@@ -550,9 +550,10 @@ fn run_sim_action_flow(
     }
 }
 
-fn run_sim_list(_cli: &Cli, file: &PathBuf) -> ExitCode {
+fn run_sim_list(cli: &Cli, file: &PathBuf) -> ExitCode {
     use sysml2_cli::sim::action_parser::extract_actions;
     use sysml2_cli::sim::constraint_eval::*;
+    use sysml2_cli::sim::state_machine::Trigger;
     use sysml2_cli::sim::state_parser::extract_state_machines;
 
     let (path_str, source) = match read_source(file) {
@@ -564,6 +565,65 @@ fn run_sim_list(_cli: &Cli, file: &PathBuf) -> ExitCode {
     let calcs = extract_calculations(&path_str, &source);
     let machines = extract_state_machines(&path_str, &source);
     let actions = extract_actions(&path_str, &source);
+
+    if cli.format == "json" {
+        // Structured JSON output for tool integration
+        let json = serde_json::json!({
+            "constraints": constraints.iter().map(|c| {
+                serde_json::json!({
+                    "name": c.name,
+                    "params": c.params.iter().map(|p| {
+                        serde_json::json!({
+                            "name": p.name,
+                            "type": p.type_ref.as_deref().unwrap_or("?"),
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>(),
+            "calculations": calcs.iter().map(|c| {
+                serde_json::json!({
+                    "name": c.name,
+                    "params": c.params.iter().map(|p| {
+                        serde_json::json!({
+                            "name": p.name,
+                            "type": p.type_ref.as_deref().unwrap_or("?"),
+                        })
+                    }).collect::<Vec<_>>(),
+                    "return_type": c.return_type.as_deref().unwrap_or("?"),
+                })
+            }).collect::<Vec<_>>(),
+            "state_machines": machines.iter().map(|m| {
+                let triggers: Vec<&str> = m.transitions.iter()
+                    .filter_map(|t| match &t.trigger {
+                        Some(Trigger::Signal(s)) => Some(s.as_str()),
+                        _ => None,
+                    })
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
+                let guards: Vec<String> = m.transitions.iter()
+                    .filter(|t| t.guard.is_some())
+                    .filter_map(|t| t.name.clone())
+                    .collect();
+                serde_json::json!({
+                    "name": m.name,
+                    "entry_state": m.entry_state,
+                    "states": m.states.iter().map(|s| &s.name).collect::<Vec<_>>(),
+                    "transitions": m.transitions.len(),
+                    "triggers": triggers,
+                    "guarded_transitions": guards,
+                })
+            }).collect::<Vec<_>>(),
+            "actions": actions.iter().map(|a| {
+                serde_json::json!({
+                    "name": a.name,
+                    "steps": a.steps.len(),
+                })
+            }).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&json).unwrap());
+        return ExitCode::SUCCESS;
+    }
 
     if constraints.is_empty() && calcs.is_empty() && machines.is_empty() && actions.is_empty() {
         println!("No simulatable constructs found in `{}`.", path_str);
@@ -602,12 +662,27 @@ fn run_sim_list(_cli: &Cli, file: &PathBuf) -> ExitCode {
         for m in &machines {
             let states: Vec<&str> = m.states.iter().map(|s| s.name.as_str()).collect();
             let entry = m.entry_state.as_deref().unwrap_or("?");
+            let triggers: Vec<&str> = m
+                .transitions
+                .iter()
+                .filter_map(|t| match &t.trigger {
+                    Some(Trigger::Signal(s)) => Some(s.as_str()),
+                    _ => None,
+                })
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
             println!(
-                "  {} [entry: {}, states: {}, transitions: {}]",
+                "  {} [entry: {}, states: {}, transitions: {}{}]",
                 m.name,
                 entry,
                 states.join(", "),
-                m.transitions.len()
+                m.transitions.len(),
+                if triggers.is_empty() {
+                    String::new()
+                } else {
+                    format!(", triggers: {}", triggers.join(", "))
+                }
             );
         }
         println!();
