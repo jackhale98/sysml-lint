@@ -8,7 +8,7 @@ extern "C" {
     fn tree_sitter_sysml() -> Language;
 }
 
-fn get_language() -> Language {
+pub(crate) fn get_language() -> Language {
     unsafe { tree_sitter_sysml() }
 }
 
@@ -30,7 +30,7 @@ pub fn parse_file(file_path: &str, source: &str) -> Model {
 }
 
 /// Extract text content of a node from source.
-fn node_text<'a>(node: &Node, source: &'a [u8]) -> &'a str {
+pub(crate) fn node_text<'a>(node: &Node, source: &'a [u8]) -> &'a str {
     std::str::from_utf8(&source[node.start_byte()..node.end_byte()]).unwrap_or("")
 }
 

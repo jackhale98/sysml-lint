@@ -34,4 +34,7 @@ jobs:
         run: cargo test
 
       - name: Lint fixtures
-        run: cargo run -- --severity error --disable duplicates,syntax test/fixtures/*.sysml
+        run: cargo run -- lint --severity error --disable duplicates,syntax test/fixtures/*.sysml
+
+      - name: Simulation smoke test
+        run: cargo run -- simulate list test/fixtures/simulation.sysml

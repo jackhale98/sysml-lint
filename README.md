@@ -1,13 +1,15 @@
 # sysml-lint
 
-A fast, standalone SysML v2 model validator and linter for CI pipelines and editor integration.
+A fast, standalone SysML v2 model validator, linter, and simulator for CI pipelines and editor integration.
 
-Built on [tree-sitter](https://tree-sitter.github.io/) for reliable parsing of SysML v2 textual notation. Produces structured diagnostics in text or JSON format with configurable severity filtering.
+Built on [tree-sitter](https://tree-sitter.github.io/) for reliable parsing of SysML v2 textual notation. Produces structured diagnostics in text or JSON format with configurable severity filtering. Includes a built-in simulation engine for constraints, calculations, state machines, and action flows.
 
 ## Table of Contents
 
 - [Installation](#installation)
 - [Usage](#usage)
+- [Linting](#linting)
+- [Simulation](#simulation)
 - [Checks](#checks)
 - [Diagnostic Codes](#diagnostic-codes)
 - [Output Formats](#output-formats)
@@ -32,44 +34,55 @@ The build compiles the [tree-sitter-sysml](https://github.com/jackhale98/tree-si
 
 ## Usage
 
+sysml-lint has two subcommands: `lint` and `simulate`.
+
+```sh
+# Lint SysML files
+sysml-lint lint model.sysml
+
+# Simulate constructs
+sysml-lint simulate list model.sysml
+```
+
+### Global Options
+
+```
+-f, --format <FORMAT>  Output format: text, json [default: text]
+-q, --quiet            Suppress summary line on stderr
+-h, --help             Print help
+-V, --version          Print version
+```
+
+## Linting
+
 ```sh
 # Lint a single file
-sysml-lint model.sysml
+sysml-lint lint model.sysml
 
 # Lint multiple files
-sysml-lint src/*.sysml
+sysml-lint lint src/*.sysml
 
 # JSON output for tooling
-sysml-lint --format json model.sysml
+sysml-lint lint --format json model.sysml
 
 # Only show warnings and errors
-sysml-lint --severity warning model.sysml
-
-# Only show errors
-sysml-lint --severity error model.sysml
+sysml-lint lint --severity warning model.sysml
 
 # Disable specific checks
-sysml-lint --disable unused,unresolved model.sysml
-
-# Quiet mode (no summary on stderr)
-sysml-lint --quiet model.sysml
+sysml-lint lint --disable unused,unresolved model.sysml
 ```
 
-### CLI Reference
+### Lint Options
 
 ```
-sysml-lint [OPTIONS] <FILES>...
+sysml-lint lint [OPTIONS] <FILES>...
 
 Arguments:
   <FILES>...  SysML v2 files to validate
 
 Options:
-  -f, --format <FORMAT>      Output format: text, json [default: text]
   -d, --disable <DISABLE>    Disable specific checks (comma-separated)
-  -s, --severity <SEVERITY>  Minimum severity to report: note, warning, error [default: note]
-  -q, --quiet                Suppress summary line on stderr
-  -h, --help                 Print help
-  -V, --version              Print version
+  -s, --severity <SEVERITY>  Minimum severity: note, warning, error [default: note]
 ```
 
 ### Exit Codes
@@ -78,6 +91,161 @@ Options:
 |------|---------|
 | 0 | No errors found (may have warnings or notes) |
 | 1 | One or more errors found, or a file could not be read |
+
+## Simulation
+
+sysml-lint includes a built-in simulation engine that can evaluate constraints, run calculations, simulate state machines, and execute action flows — all from the command line.
+
+### List Simulatable Constructs
+
+```sh
+sysml-lint simulate list model.sysml
+```
+
+Output:
+```
+Constraints:
+  SpeedLimit (speed: Real)
+
+Calculations:
+  KineticEnergy (mass: Real, velocity: Real) -> Real
+
+State Machines:
+  TrafficLight [entry: red, states: red, yellow, green, transitions: 3]
+
+Actions:
+  ProcessOrder (7 steps)
+```
+
+### Evaluate Constraints and Calculations
+
+```sh
+# Evaluate a constraint
+sysml-lint simulate eval model.sysml -b speed=100 -n SpeedLimit
+# Output: constraint SpeedLimit: satisfied
+
+sysml-lint simulate eval model.sysml -b speed=150 -n SpeedLimit
+# Output: constraint SpeedLimit: violated
+
+# Evaluate a calculation
+sysml-lint simulate eval model.sysml -b mass=1500,velocity=30 -n KineticEnergy
+# Output: calc KineticEnergy: 675000
+
+# Evaluate all constraints and calcs
+sysml-lint simulate eval model.sysml -b speed=100,mass=1500
+
+# JSON output
+sysml-lint -f json simulate eval model.sysml -b speed=100
+```
+
+### Simulate State Machines
+
+```sh
+# Simulate with events
+sysml-lint simulate state-machine model.sysml -n TrafficLight -e next,next,next
+
+# Output:
+# State Machine: TrafficLight
+# Initial state: red
+#
+#   Step 0: red -- [next]--> green
+#   Step 1: green -- [next]--> yellow
+#   Step 2: yellow -- [next]--> red
+#
+# Status: deadlocked (3 steps, current: red)
+
+# With guard variable bindings
+sysml-lint simulate state-machine model.sysml -n Controller -b temperature=150
+
+# Limit simulation steps
+sysml-lint simulate state-machine model.sysml -n Loop -m 50
+
+# JSON trace output
+sysml-lint -f json simulate state-machine model.sysml -n TrafficLight -e next
+```
+
+#### State Machine Options
+
+```
+sysml-lint simulate state-machine [OPTIONS] <FILE>
+
+Options:
+  -n, --name <NAME>        State machine name (default: first found)
+  -e, --events <EVENTS>    Events to inject (comma-separated)
+  -m, --max-steps <N>      Maximum simulation steps [default: 100]
+  -b, --bind <BINDINGS>    Variable bindings for guards (name=value)
+```
+
+#### State Machine Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Completed or still running |
+| 1 | Deadlocked (no enabled transitions) |
+| 2 | Max steps reached |
+
+### Execute Action Flows
+
+```sh
+# Execute an action flow
+sysml-lint simulate action-flow model.sysml -n ProcessOrder
+
+# Output:
+# Action: ProcessOrder
+#
+#   Step 0: [perform] perform validate
+#   Step 1: [perform] perform checkInventory
+#   Step 2: [perform] perform ship
+#   Step 3: [perform] perform notifyCustomer
+#
+# Status: completed (4 steps)
+
+# With variable bindings for conditionals
+sysml-lint simulate action-flow model.sysml -n Workflow -b priority=high
+
+# JSON output
+sysml-lint -f json simulate action-flow model.sysml -n ProcessOrder
+```
+
+#### Action Flow Options
+
+```
+sysml-lint simulate action-flow [OPTIONS] <FILE>
+
+Options:
+  -n, --name <NAME>        Action name (default: first found)
+  -m, --max-steps <N>      Maximum execution steps [default: 1000]
+  -b, --bind <BINDINGS>    Variable bindings (name=value)
+```
+
+### Simulation Capabilities
+
+The simulation engine supports:
+
+**Constraint Evaluation:**
+- Boolean expressions with comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`)
+- Logical operators (`and`, `or`, `xor`, `not`, `implies`)
+- Arithmetic operators (`+`, `-`, `*`, `/`, `%`, `**`)
+- Built-in functions: `abs`, `sqrt`, `floor`, `ceil`, `round`, `min`, `max`, `sum`
+- Variable bindings from command line
+
+**State Machines:**
+- Entry state initialization
+- Signal-based triggers (`accept signal`)
+- Guard conditions with expression evaluation
+- Entry/exit/do actions
+- Effects on transitions
+- Deadlock detection
+- Step-by-step or run-to-completion modes
+
+**Action Flows:**
+- Sequential action execution
+- Fork/join (parallel simulation)
+- If/else conditionals
+- While loops with guard expressions
+- Assign actions (updates environment)
+- Send actions
+- Decide/merge nodes
 
 ## Checks
 
@@ -214,7 +382,7 @@ jobs:
           echo "$PWD/target/release" >> $GITHUB_PATH
 
       - name: Lint SysML models
-        run: sysml-lint --severity warning models/**/*.sysml
+        run: sysml-lint lint --severity warning models/**/*.sysml
 ```
 
 ### GitLab CI
@@ -223,7 +391,7 @@ jobs:
 sysml-lint:
   stage: test
   script:
-    - sysml-lint --format json --severity warning models/*.sysml > lint-results.json
+    - sysml-lint lint --format json --severity warning models/*.sysml > lint-results.json
   artifacts:
     reports:
       codequality: lint-results.json
@@ -236,22 +404,25 @@ sysml-lint:
 # .git/hooks/pre-commit
 sysml_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.sysml$')
 if [ -n "$sysml_files" ]; then
-    sysml-lint --severity error $sysml_files
+    sysml-lint lint --severity error $sysml_files
 fi
 ```
 
 ## Editor Integration
 
-### Emacs (Flymake)
+### Emacs (sysml2-mode)
 
-sysml-lint integrates with [sysml2-mode](https://github.com/jackhale98/sysml2-mode) via Flymake. With `sysml-lint` on your `$PATH`, Flymake will show diagnostics inline as you edit.
+sysml-lint integrates with [sysml2-mode](https://github.com/jackhale98/sysml2-mode) for both Flymake diagnostics and interactive simulation. With `sysml-lint` on your `$PATH`:
+
+- **Flymake**: Diagnostics appear inline as you edit
+- **Simulation**: Run `M-x sysml2-simulate` to simulate constraints, state machines, and action flows interactively
 
 ### Generic (JSON pipe)
 
 Any editor that can run an external command and parse JSON can integrate with sysml-lint:
 
 ```sh
-sysml-lint --format json --quiet model.sysml
+sysml-lint lint --format json --quiet model.sysml
 ```
 
 The JSON output includes byte offsets (`start_byte`, `end_byte`) for precise highlighting and line/column positions for gutter markers.
@@ -298,9 +469,9 @@ The build script checks `./tree-sitter-sysml/src/` first, then falls back to `..
 
 ```
 src/
-  main.rs          CLI entry point (clap)
+  main.rs          CLI entry point (clap subcommands)
   lib.rs           Public module exports
-  parser.rs        Tree-sitter FFI + parse tree → Model extraction
+  parser.rs        Tree-sitter FFI + parse tree -> Model extraction
   model.rs         Model types: definitions, usages, connections, flows, etc.
   diagnostic.rs    Diagnostic/Severity types and error codes
   output.rs        Text and JSON formatters
@@ -313,6 +484,18 @@ src/
     ports.rs       W006: port type mismatches
     constraints.rs W007: empty constraint bodies
     calculations.rs W008: calc missing return
+  sim/
+    mod.rs         Simulation engine modules
+    expr.rs        Expression AST and runtime values (Value, Expr, Env)
+    expr_parser.rs Tree-sitter -> Expr AST extraction
+    eval.rs        Expression evaluator with built-in functions
+    constraint_eval.rs  Constraint/calc model extraction and evaluation
+    state_machine.rs    State machine model types
+    state_parser.rs     Tree-sitter -> state machine extraction
+    state_sim.rs        State machine simulation engine
+    action_flow.rs      Action flow model types
+    action_parser.rs    Tree-sitter -> action flow extraction
+    action_exec.rs      Action flow execution engine
 tests/
   integration.rs   Integration tests (17 tests)
 test/
@@ -335,8 +518,8 @@ The parser uses tree-sitter-sysml via FFI (`extern "C"`) to parse SysML v2 textu
 
 The extracted model provides two key queries used by checks:
 
-- `defined_names()` — All definition names in the file
-- `referenced_names()` — All names referenced via typing, specialization, connections, flows, satisfactions, verifications, allocations, and explicit type references
+- `defined_names()` -- All definition names in the file
+- `referenced_names()` -- All names referenced via typing, specialization, connections, flows, satisfactions, verifications, allocations, and explicit type references
 
 ### Standard Library
 
@@ -349,6 +532,16 @@ sysml-lint recognizes 49 built-in SysML v2 standard library types so they are no
 - **Libraries**: `TradeStudy`, `VerdictKind`, `SampledFunction`, etc.
 
 Qualified standard library references (e.g., `ISQ::MassValue`, `SI::kg`, `ScalarValues::Real`) are also recognized via namespace prefix matching.
+
+### Simulation Engine
+
+The simulation engine re-parses source files using tree-sitter and extracts behavioral constructs into typed models:
+
+- **Expressions**: Full AST with arithmetic, comparison, logical, and function call nodes
+- **Constraints**: Boolean expression evaluation with variable bindings
+- **Calculations**: Expression evaluation with parameterized inputs
+- **State Machines**: Event-driven simulation with triggers, guards, effects, and entry/exit actions
+- **Action Flows**: Sequential execution, fork/join parallelism, conditionals, loops, and assignments
 
 ## License
 
