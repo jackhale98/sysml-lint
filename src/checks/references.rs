@@ -87,6 +87,10 @@ impl Check for UnresolvedTypeCheck {
         for &b in BUILTIN_TYPES {
             known.insert(b);
         }
+        // Add names resolved from imports
+        for name in &model.resolved_imports {
+            known.insert(name.as_str());
+        }
 
         let mut diagnostics = Vec::new();
 

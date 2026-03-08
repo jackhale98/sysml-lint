@@ -31,6 +31,11 @@ struct Cli {
     /// Suppress summary line on stderr.
     #[arg(short, long, global = true)]
     quiet: bool,
+
+    /// Additional SysML files or directories to include for import resolution.
+    /// Definitions from these files are available to imported names.
+    #[arg(short = 'I', long = "include", global = true)]
+    include: Vec<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -138,6 +143,24 @@ fn run_lint(cli: &Cli, files: &[PathBuf], disable: &[String], severity: &str) ->
         .filter(|c| !disabled.contains(c.name()))
         .collect();
 
+    // Build project resolver if includes are specified
+    let project = if !cli.include.is_empty() {
+        let mut all_files: Vec<PathBuf> = files.to_vec();
+        for inc in &cli.include {
+            if inc.is_dir() {
+                collect_files_recursive(inc, &mut all_files);
+            } else {
+                all_files.push(inc.clone());
+            }
+        }
+        Some(sysml_lint::resolver::Project::from_files(&all_files))
+    } else if files.len() > 1 {
+        // Multi-file lint: auto-resolve imports between the given files
+        Some(sysml_lint::resolver::Project::from_files(files))
+    } else {
+        None
+    };
+
     let mut all_diagnostics: Vec<Diagnostic> = Vec::new();
     let mut had_parse_error = false;
 
@@ -153,7 +176,12 @@ fn run_lint(cli: &Cli, files: &[PathBuf], disable: &[String], severity: &str) ->
             }
         };
 
-        let model = sysml_parser::parse_file(&path_str, &source);
+        let mut model = sysml_parser::parse_file(&path_str, &source);
+
+        // Resolve imports if project is available
+        if let Some(ref proj) = project {
+            model.resolved_imports = proj.resolve_imports(&model);
+        }
 
         for check in &active_checks {
             let diagnostics = check.run(&model);
@@ -237,6 +265,23 @@ fn parse_bindings(bindings: &[String]) -> sysml_lint::sim::expr::Env {
         }
     }
     env
+}
+
+fn collect_files_recursive(dir: &PathBuf, files: &mut Vec<PathBuf>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_files_recursive(&path, files);
+            } else if let Some(ext) = path.extension() {
+                if ext == "sysml" || ext == "kerml" {
+                    if !files.contains(&path) {
+                        files.push(path);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn read_source(file: &PathBuf) -> Result<(String, String), ExitCode> {

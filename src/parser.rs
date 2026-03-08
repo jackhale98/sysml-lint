@@ -276,6 +276,27 @@ fn walk_node(
             extract_flow(&node, source, model);
         }
 
+        // --- Import statement ---
+        "import_statement" => {
+            let full_text = node_text(&node, source).to_string();
+            let is_wildcard = full_text.contains("::*");
+            let is_recursive = full_text.contains("::**");
+            // Extract the qualified_name child
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "qualified_name" || child.kind() == "identifier" {
+                    let path = node_text(&child, source).to_string();
+                    model.imports.push(Import {
+                        path,
+                        is_wildcard,
+                        is_recursive,
+                        span: Span::from_node(&node),
+                    });
+                    break;
+                }
+            }
+        }
+
         // --- Require statement (verify inside verification) ---
         "require_statement" => {
             if let Some(ver_name) = enclosing_verification {

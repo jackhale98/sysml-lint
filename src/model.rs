@@ -200,6 +200,15 @@ pub struct TypeReference {
     pub span: Span,
 }
 
+/// An import statement (e.g., `import Vehicles::*;`).
+#[derive(Debug, Clone, Serialize)]
+pub struct Import {
+    pub path: String,
+    pub is_wildcard: bool,
+    pub is_recursive: bool,
+    pub span: Span,
+}
+
 /// Complete model extracted from a SysML v2 file.
 #[derive(Debug, Clone, Serialize)]
 pub struct Model {
@@ -213,6 +222,10 @@ pub struct Model {
     pub allocations: Vec<Allocation>,
     pub syntax_errors: Vec<SyntaxError>,
     pub type_references: Vec<TypeReference>,
+    pub imports: Vec<Import>,
+    /// Names resolved from imports (populated by the resolver).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub resolved_imports: Vec<String>,
 }
 
 impl Model {
@@ -228,6 +241,8 @@ impl Model {
             allocations: Vec::new(),
             syntax_errors: Vec::new(),
             type_references: Vec::new(),
+            imports: Vec::new(),
+            resolved_imports: Vec::new(),
         }
     }
 

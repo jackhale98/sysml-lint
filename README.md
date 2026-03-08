@@ -47,10 +47,11 @@ sysml-lint simulate list model.sysml
 ### Global Options
 
 ```
--f, --format <FORMAT>  Output format: text, json [default: text]
--q, --quiet            Suppress summary line on stderr
--h, --help             Print help
--V, --version          Print version
+-f, --format <FORMAT>      Output format: text, json [default: text]
+-q, --quiet                Suppress summary line on stderr
+-I, --include <PATH>       Additional files/directories for import resolution
+-h, --help                 Print help
+-V, --version              Print version
 ```
 
 ## Linting
@@ -59,8 +60,11 @@ sysml-lint simulate list model.sysml
 # Lint a single file
 sysml-lint lint model.sysml
 
-# Lint multiple files
+# Lint multiple files (imports auto-resolve between them)
 sysml-lint lint src/*.sysml
+
+# Include additional files for import resolution
+sysml-lint lint model.sysml -I lib/
 
 # JSON output for tooling
 sysml-lint lint --format json model.sysml
@@ -520,6 +524,28 @@ The extracted model provides two key queries used by checks:
 
 - `defined_names()` -- All definition names in the file
 - `referenced_names()` -- All names referenced via typing, specialization, connections, flows, satisfactions, verifications, allocations, and explicit type references
+
+### Multi-File Import Resolution
+
+sysml-lint supports cross-file import resolution. When linting multiple files or using `--include`, definitions from imported packages are resolved across files:
+
+```sh
+# Auto-resolve imports between all files being linted
+sysml-lint lint project/*.sysml
+
+# Include a library directory for import resolution
+sysml-lint lint model.sysml -I shared-lib/
+
+# Works with simulation too
+sysml-lint simulate list model.sysml -I lib/
+```
+
+Import resolution supports:
+- `import Package::*;` -- wildcard imports (all definitions from a package)
+- `import Package::**;` -- recursive wildcard imports
+- `import Package::SpecificName;` -- specific name imports
+- Package definitions are indexed by their `package` declaration name
+- Files are also indexed by filename stem (e.g., `vehicles.sysml` makes names available under `vehicles`)
 
 ### Standard Library
 
