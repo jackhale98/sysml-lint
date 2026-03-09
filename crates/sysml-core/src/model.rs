@@ -160,6 +160,9 @@ pub struct Definition {
     /// Byte offset of the closing `}` of the definition body.
     #[serde(skip)]
     pub body_end_byte: Option<usize>,
+    /// Fully qualified name (populated by qualify_model).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qualified_name: Option<crate::qualified_name::QualifiedName>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -265,6 +268,9 @@ pub struct Usage {
     /// Subsets target name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subsets: Option<String>,
+    /// Fully qualified name (populated by qualify_model).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qualified_name: Option<crate::qualified_name::QualifiedName>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -459,4 +465,45 @@ impl Model {
 pub fn simple_name(name: &str) -> &str {
     name.rsplit("::").next().unwrap_or(name)
         .rsplit('.').next().unwrap_or(name)
+}
+
+/// Populate `qualified_name` fields on all definitions and usages by walking
+/// the `parent_def` chains. Call this after parsing to enrich the model.
+pub fn qualify_model(model: &mut Model) {
+    use crate::qualified_name::QualifiedName;
+    use std::collections::HashMap;
+
+    // Build a map of definition name -> parent chain for fast lookup
+    let mut def_parents: HashMap<String, Option<String>> = HashMap::new();
+    for d in &model.definitions {
+        def_parents.insert(d.name.clone(), d.parent_def.clone());
+    }
+
+    // Reconstruct qualified name by walking parent chain
+    let build_qn = |name: &str, parent: &Option<String>| -> QualifiedName {
+        let mut segments = Vec::new();
+        if let Some(p) = parent {
+            // Walk up the parent chain
+            let mut chain = vec![p.clone()];
+            let mut current = p.clone();
+            while let Some(Some(grandparent)) = def_parents.get(&current) {
+                chain.push(grandparent.clone());
+                current = grandparent.clone();
+            }
+            chain.reverse();
+            segments.extend(chain);
+        }
+        segments.push(name.to_string());
+        QualifiedName::new(segments)
+    };
+
+    // Apply to definitions
+    for d in &mut model.definitions {
+        d.qualified_name = Some(build_qn(&d.name, &d.parent_def));
+    }
+
+    // Apply to usages
+    for u in &mut model.usages {
+        u.qualified_name = Some(build_qn(&u.name, &u.parent_def));
+    }
 }

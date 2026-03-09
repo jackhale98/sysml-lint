@@ -11,25 +11,25 @@ mod output;
 
 #[derive(Parser)]
 #[command(
-    name = "sysml-cli",
+    name = "sysml",
     about = "SysML v2 command-line tool for validation, simulation, diagram generation, and model management",
     long_about = "\
-sysml-cli works with SysML v2 models in textual notation.
+sysml works with SysML v2 models in textual notation.
 
 SysML v2 is the next-generation systems modeling language from OMG. It uses \
 a textual notation where 'definitions' declare reusable types (part def, port def, \
 action def, etc.) and 'usages' create instances of those types within a context.
 
 GETTING STARTED:
-  Validate a model:       sysml-cli lint model.sysml
-  List model elements:    sysml-cli list --kind parts model.sysml
-  Show element details:   sysml-cli show model.sysml Vehicle
-  Generate a diagram:     sysml-cli diagram -t bdd -o mermaid model.sysml
-  Simulate a state machine: sysml-cli simulate state-machine model.sysml
-  Create a new definition: sysml-cli new part-def Vehicle --doc 'A vehicle'
-  Edit an existing file:  sysml-cli edit add model.sysml part engine -t Engine
-  Format a file:          sysml-cli fmt model.sysml
-  Export to FMI:          sysml-cli export interfaces model.sysml --part MyPart
+  Validate a model:       sysml lint model.sysml
+  List model elements:    sysml list --kind parts model.sysml
+  Show element details:   sysml show model.sysml Vehicle
+  Generate a diagram:     sysml diagram -t bdd -o mermaid model.sysml
+  Simulate a state machine: sysml simulate state-machine model.sysml
+  Create a new definition: sysml new part-def Vehicle --doc 'A vehicle'
+  Edit an existing file:  sysml edit add model.sysml part engine -t Engine
+  Format a file:          sysml fmt model.sysml
+  Export to FMI:          sysml export interfaces model.sysml --part MyPart
 
 LEARN MORE:
   SysML v2 spec:          https://www.omgsysml.org/
@@ -408,6 +408,188 @@ enum Command {
         #[arg(long)]
         unallocated: bool,
     },
+    /// Initialize a SysML project in the current directory.
+    ///
+    /// Creates a `.sysml/` directory with a `config.toml` file containing
+    /// default project settings. Auto-detects the model root if `.sysml`
+    /// files are present.
+    ///
+    /// EXAMPLES:
+    ///   sysml init
+    ///   sysml init --force
+    Init {
+        /// Overwrite existing `.sysml/config.toml` if present.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build or rebuild the project index (cache).
+    ///
+    /// Parses all SysML files under the model root and populates an
+    /// in-memory cache of elements and relationships. Requires `sysml init`.
+    ///
+    /// EXAMPLES:
+    ///   sysml index
+    ///   sysml index --stats
+    Index {
+        /// Rebuild everything including records (default).
+        #[arg(long, default_value = "true")]
+        full: bool,
+
+        /// Show index statistics.
+        #[arg(long)]
+        stats: bool,
+    },
+    /// Validate SysML v2 models and check project integrity.
+    ///
+    /// Runs all lint checks plus optional project-level checks (broken
+    /// record references, orphaned records). Use `sysml lint` as a
+    /// shortcut for `sysml check --lint-only`.
+    ///
+    /// EXAMPLES:
+    ///   sysml check model.sysml
+    ///   sysml check --lint-only model.sysml
+    Check {
+        /// SysML v2 files to validate.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+
+        /// Disable specific checks (comma-separated).
+        #[arg(short, long, value_delimiter = ',')]
+        disable: Vec<String>,
+
+        /// Minimum severity to report: note, warning, error.
+        #[arg(short, long, default_value = "note")]
+        severity: String,
+
+        /// Run only lint checks (no record or project checks).
+        #[arg(long)]
+        lint_only: bool,
+    },
+    /// Verification domain commands.
+    ///
+    /// Manage verification case execution, coverage analysis, and
+    /// test record tracking for SysML v2 models.
+    ///
+    /// EXAMPLES:
+    ///   sysml verify coverage model.sysml
+    ///   sysml verify list model.sysml
+    Verify {
+        #[command(subcommand)]
+        kind: VerifyCommand,
+    },
+    /// Generate SysML v2 scaffolding and example projects.
+    ///
+    /// Create element templates with teaching comments, domain-specific
+    /// templates, or complete example projects.
+    ///
+    /// EXAMPLES:
+    ///   sysml scaffold element part-def Vehicle
+    ///   sysml scaffold example brake-system
+    ///   sysml scaffold list-examples
+    Scaffold {
+        #[command(subcommand)]
+        kind: ScaffoldCommand,
+    },
+    /// Risk management commands.
+    ///
+    /// Identify, assess, and track risks. Generate risk matrices and
+    /// FMEA worksheets from SysML v2 models.
+    ///
+    /// EXAMPLES:
+    ///   sysml risk list model.sysml
+    ///   sysml risk matrix model.sysml
+    ///   sysml risk fmea model.sysml
+    Risk {
+        #[command(subcommand)]
+        kind: RiskCommand,
+    },
+    /// Tolerance analysis commands.
+    ///
+    /// Perform worst-case, RSS, and Monte Carlo tolerance stack-up
+    /// analysis on dimension chains defined in SysML v2 models.
+    ///
+    /// EXAMPLES:
+    ///   sysml tol analyze model.sysml
+    ///   sysml tol sensitivity model.sysml
+    Tol {
+        #[command(subcommand)]
+        kind: TolCommand,
+    },
+    /// Bill of materials commands.
+    ///
+    /// Build hierarchical BOM trees, perform mass/cost rollups,
+    /// where-used queries, and CSV export from SysML v2 models.
+    ///
+    /// EXAMPLES:
+    ///   sysml bom rollup model.sysml --root Vehicle
+    ///   sysml bom where-used model.sysml --part Engine
+    ///   sysml bom export model.sysml --root Vehicle
+    Bom {
+        #[command(subcommand)]
+        kind: BomCommand,
+    },
+    /// Supplier management commands.
+    ///
+    /// List suppliers, view approved source lists, and generate
+    /// request-for-quotation documents from SysML v2 models.
+    ///
+    /// EXAMPLES:
+    ///   sysml source list model.sysml
+    ///   sysml source asl model.sysml
+    ///   sysml source rfq --part Resistor --quantity 5000
+    Source {
+        #[command(subcommand)]
+        kind: SourceCommand,
+    },
+    /// Manufacturing execution commands.
+    ///
+    /// List manufacturing routings extracted from action definitions
+    /// and compute SPC statistics on process parameter readings.
+    ///
+    /// EXAMPLES:
+    ///   sysml mfg list model.sysml
+    ///   sysml mfg spc --parameter Diameter --values 10.01,10.02,9.99,10.00
+    Mfg {
+        #[command(subcommand)]
+        kind: MfgCommand,
+    },
+    /// Quality control commands.
+    ///
+    /// ANSI Z1.4 sample size lookup and process capability (Cp/Cpk)
+    /// analysis for manufacturing quality control.
+    ///
+    /// EXAMPLES:
+    ///   sysml qc sample-size --lot-size 500
+    ///   sysml qc capability --usl 10.05 --lsl 9.95 --values 10.01,10.02,9.99
+    Qc {
+        #[command(subcommand)]
+        kind: QcCommand,
+    },
+    /// Corrective and preventive action (CAPA) commands.
+    ///
+    /// Track nonconformances, analyze trends, and manage the
+    /// CAPA lifecycle.
+    ///
+    /// EXAMPLES:
+    ///   sysml capa trend model.sysml
+    ///   sysml capa list
+    Capa {
+        #[command(subcommand)]
+        kind: CapaCommand,
+    },
+    /// Cross-domain reporting commands.
+    ///
+    /// Generate project dashboards, full lifecycle traceability
+    /// threads, and gate readiness checks from SysML v2 models.
+    ///
+    /// EXAMPLES:
+    ///   sysml report dashboard model.sysml
+    ///   sysml report traceability model.sysml --requirement BrakeReq
+    ///   sysml report gate model.sysml --gate-name CDR
+    Report {
+        #[command(subcommand)]
+        kind: ReportCommand,
+    },
     /// Model completeness and quality report.
     ///
     /// Checks documentation coverage, type completeness, requirement
@@ -415,8 +597,8 @@ enum Command {
     /// Use --check in CI to enforce a minimum score.
     ///
     /// EXAMPLES:
-    ///   sysml-cli coverage model.sysml
-    ///   sysml-cli coverage --check --min-score 80 model.sysml
+    ///   sysml coverage model.sysml
+    ///   sysml coverage --check --min-score 80 model.sysml
     Coverage {
         /// SysML v2 files to analyze.
         #[arg(required = true)]
@@ -427,6 +609,19 @@ enum Command {
         /// Minimum acceptable score (0-100, used with --check).
         #[arg(long, default_value = "0")]
         min_score: f64,
+    },
+    /// Read a help topic about SysML or this tool.
+    ///
+    /// Displays concise tutorials and reference material for engineers
+    /// who are new to SysML v2 or model-based systems engineering.
+    ///
+    /// EXAMPLES:
+    ///   sysml guide                    List available topics
+    ///   sysml guide getting-started    Tutorial for first-time users
+    ///   sysml guide sysml-basics       SysML v2 language overview
+    Guide {
+        /// Topic to display (omit to list all topics).
+        topic: Option<String>,
     },
 }
 
@@ -670,6 +865,286 @@ pub(crate) enum ExportCommand {
     },
 }
 
+#[derive(Subcommand)]
+pub(crate) enum VerifyCommand {
+    /// Show verification coverage for requirements.
+    ///
+    /// Combines model traceability (verify relationships) with execution
+    /// records to show which requirements have been verified and passed.
+    Coverage {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// List verification cases found in model files.
+    List {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// Show verification status for all requirements.
+    Status {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ScaffoldCommand {
+    /// Generate a SysML v2 element with teaching comments.
+    ///
+    /// Like `sysml new`, but includes explanatory comments.
+    Element {
+        /// Element kind (part-def, port-def, etc.).
+        #[arg(required = true)]
+        kind: String,
+
+        /// Element name.
+        #[arg(required = true)]
+        name: String,
+
+        /// Specialization supertype.
+        #[arg(long)]
+        extends: Option<String>,
+
+        /// Documentation comment.
+        #[arg(long)]
+        doc: Option<String>,
+
+        /// Disable teaching comments.
+        #[arg(long)]
+        no_comments: bool,
+    },
+    /// Generate a complete example project.
+    ///
+    /// Writes a set of SysML v2 files forming a working example project
+    /// with parts, requirements, and verification cases.
+    ///
+    /// EXAMPLES:
+    ///   sysml scaffold example brake-system
+    ///   sysml scaffold example sensor-module
+    Example {
+        /// Example name (use `list-examples` to see available examples).
+        #[arg(required = true)]
+        name: String,
+
+        /// Output directory (default: current directory).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// List available example projects.
+    ListExamples,
+    /// List available element kinds for scaffolding.
+    ListKinds,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum RiskCommand {
+    /// List risks found in model files.
+    List {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// Generate a risk matrix from model risks.
+    Matrix {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// Generate an FMEA worksheet from model risks.
+    Fmea {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum TolCommand {
+    /// Run tolerance stack-up analysis on dimension chains.
+    Analyze {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+
+        /// Analysis method: worst-case, rss, monte-carlo.
+        #[arg(long, default_value = "worst-case")]
+        method: String,
+
+        /// Number of Monte Carlo iterations.
+        #[arg(long, default_value = "10000")]
+        iterations: usize,
+    },
+    /// Rank tolerance contributors by sensitivity.
+    Sensitivity {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum BomCommand {
+    /// Build a hierarchical BOM tree with optional mass/cost rollup.
+    Rollup {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Root part definition name.
+        #[arg(long, required = true)]
+        root: String,
+        /// Include mass rollup in output.
+        #[arg(long)]
+        include_mass: bool,
+        /// Include cost rollup in output.
+        #[arg(long)]
+        include_cost: bool,
+    },
+    /// Find all definitions that use a given part (reverse lookup).
+    WhereUsed {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Part definition name to search for.
+        #[arg(long, required = true)]
+        part: String,
+    },
+    /// Export a flattened BOM as CSV.
+    Export {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Root part definition name.
+        #[arg(long, required = true)]
+        root: String,
+        /// Output format (csv).
+        #[arg(long, default_value = "csv")]
+        format: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum SourceCommand {
+    /// List suppliers extracted from model files.
+    List {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// Show approved source list (approved/preferred suppliers only).
+    Asl {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// Generate a request-for-quotation (RFQ) document.
+    Rfq {
+        /// Part name.
+        #[arg(long, required = true)]
+        part: String,
+        /// Part description.
+        #[arg(long, default_value = "")]
+        description: String,
+        /// Required quantity.
+        #[arg(long, default_value = "1")]
+        quantity: u32,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum MfgCommand {
+    /// List manufacturing routings (action definitions) in model files.
+    List {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// Compute SPC statistics for a parameter from readings.
+    Spc {
+        /// Parameter name.
+        #[arg(long, required = true)]
+        parameter: String,
+        /// Comma-separated measurement values.
+        #[arg(long, required = true, value_delimiter = ',')]
+        values: Vec<f64>,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum QcCommand {
+    /// Look up ANSI Z1.4 sample size for a given lot.
+    SampleSize {
+        /// Lot size (total number of units).
+        #[arg(long, required = true)]
+        lot_size: usize,
+        /// Acceptable quality level (percent defective).
+        #[arg(long, default_value = "1.0")]
+        aql: f64,
+        /// Inspection level: reduced, normal, tightened.
+        #[arg(long, default_value = "normal")]
+        level: String,
+    },
+    /// Compute process capability indices (Cp/Cpk).
+    Capability {
+        /// Upper specification limit.
+        #[arg(long, required = true)]
+        usl: f64,
+        /// Lower specification limit.
+        #[arg(long, required = true)]
+        lsl: f64,
+        /// Comma-separated measurement values.
+        #[arg(long, required = true, value_delimiter = ',')]
+        values: Vec<f64>,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum CapaCommand {
+    /// Analyze NCR trends grouped by category or severity.
+    Trend {
+        /// SysML v2 files to correlate with NCR data.
+        files: Vec<PathBuf>,
+        /// Grouping dimension: category, severity.
+        #[arg(long, default_value = "category")]
+        group_by: String,
+    },
+    /// Show CAPA status overview and workflow guidance.
+    List,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ReportCommand {
+    /// Generate a project dashboard from model files.
+    Dashboard {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// Trace a requirement through satisfaction, verification, and execution.
+    Traceability {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Requirement name to trace.
+        #[arg(long, required = true)]
+        requirement: String,
+    },
+    /// Check gate readiness (coverage, risks, NCRs).
+    Gate {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Gate name (e.g. PDR, CDR, FRR).
+        #[arg(long, required = true)]
+        gate_name: String,
+        /// Minimum verification coverage percentage required.
+        #[arg(long, default_value = "80.0")]
+        min_coverage: f64,
+    },
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
@@ -750,6 +1225,22 @@ fn main() -> ExitCode {
         Command::Diff { file_a, file_b } => commands::diff::run(&cli, file_a, file_b),
         Command::Allocation { files, check, unallocated } => commands::allocation::run(&cli, files, *check, *unallocated),
         Command::Coverage { files, check, min_score } => commands::coverage::run(&cli, files, *check, *min_score),
+        Command::Init { force } => commands::init::run(&cli, *force),
+        Command::Index { full, stats } => commands::index::run(&cli, *full, *stats),
+        Command::Check { files, disable, severity, lint_only } => {
+            commands::check::run(&cli, files, disable, severity, *lint_only)
+        }
+        Command::Verify { kind } => commands::verify::run(&cli, kind),
+        Command::Scaffold { kind } => commands::scaffold::run(kind),
+        Command::Risk { kind } => commands::risk::run(&cli, kind),
+        Command::Tol { kind } => commands::tol::run(&cli, kind),
+        Command::Bom { kind } => commands::bom::run(&cli, kind),
+        Command::Source { kind } => commands::source::run(&cli, kind),
+        Command::Mfg { kind } => commands::mfg::run(&cli, kind),
+        Command::Qc { kind } => commands::qc::run(&cli, kind),
+        Command::Capa { kind } => commands::capa::run(&cli, kind),
+        Command::Report { kind } => commands::report::run(&cli, kind),
+        Command::Guide { topic } => commands::help_topics::run(topic.as_deref()),
     }
 }
 
@@ -770,7 +1261,7 @@ fn generate_completions(shell: &str) {
     };
 
     let mut cmd = Cli::command();
-    generate(shell, &mut cmd, "sysml-cli", &mut std::io::stdout());
+    generate(shell, &mut cmd, "sysml", &mut std::io::stdout());
 }
 
 pub(crate) fn read_source(file: &PathBuf) -> Result<(String, String), ExitCode> {

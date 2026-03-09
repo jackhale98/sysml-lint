@@ -8,7 +8,7 @@ use std::fs;
 
 fn cmd() -> Command {
     #[allow(deprecated)]
-    Command::cargo_bin("sysml-cli").unwrap()
+    Command::cargo_bin("sysml").unwrap()
 }
 
 fn fixture(name: &str) -> String {
@@ -500,7 +500,7 @@ fn version_flag() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("sysml-cli"));
+        .stdout(predicate::str::contains("sysml"));
 }
 
 #[test]
@@ -509,7 +509,7 @@ fn completions_bash() {
         .args(["completions", "bash"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("_sysml-cli"));
+        .stdout(predicate::str::contains("_sysml"));
 }
 
 #[test]
@@ -518,5 +518,5 @@ fn completions_zsh() {
         .args(["completions", "zsh"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("sysml-cli"));
+        .stdout(predicate::str::contains("sysml"));
 }

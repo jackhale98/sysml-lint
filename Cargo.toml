@@ -3,6 +3,16 @@ resolver = "2"
 members = [
     "crates/sysml-core",
     "crates/sysml-cli",
+    "crates/sysml-scaffold",
+    "crates/sysml-verify",
+    "crates/sysml-risk",
+    "crates/sysml-tol",
+    "crates/sysml-bom",
+    "crates/sysml-report",
+    "crates/sysml-mfg",
+    "crates/sysml-qc",
+    "crates/sysml-capa",
+    "crates/sysml-source",
 ]
 
 [workspace.package]

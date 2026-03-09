@@ -14,13 +14,20 @@
 //! - [`sim`] — Simulation engine (constraints, state machines, action flows)
 //! - [`export`] — Export to FMI, Modelica, and SSP formats
 
+pub mod cache;
 pub mod checks;
 pub mod codegen;
+pub mod config;
 pub mod diagram;
 pub mod diagnostic;
 pub mod export;
+pub mod index;
+pub mod interactive;
 pub mod model;
 pub mod parser;
+pub mod project;
+pub mod qualified_name;
 pub mod query;
+pub mod record;
 pub mod resolver;
 pub mod sim;

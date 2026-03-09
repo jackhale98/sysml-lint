@@ -15,19 +15,19 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: sysml-cli-linux-x86_64
+            artifact: sysml-linux-x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: sysml-cli-linux-aarch64
+            artifact: sysml-linux-aarch64
           - target: x86_64-apple-darwin
             os: macos-latest
-            artifact: sysml-cli-macos-x86_64
+            artifact: sysml-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
-            artifact: sysml-cli-macos-aarch64
+            artifact: sysml-macos-aarch64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact: sysml-cli-windows-x86_64
+            artifact: sysml-windows-x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -66,14 +66,14 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../${{ matrix.artifact }}.tar.gz sysml-cli
+          tar czf ../../../${{ matrix.artifact }}.tar.gz sysml
           cd ../../..
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../${{ matrix.artifact }}.zip sysml-cli.exe
+          7z a ../../../${{ matrix.artifact }}.zip sysml.exe
           cd ../../..
 
       - name: Upload artifact

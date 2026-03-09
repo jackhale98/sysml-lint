@@ -559,6 +559,7 @@ fn walk_node_scoped(
                     parent_def: parent_def_name.map(|s| s.to_string()),
                     body_start_byte,
                     body_end_byte,
+                    qualified_name: None,
                 });
 
                 // Collect doc comments as model-level comments
@@ -622,6 +623,7 @@ fn walk_node_scoped(
                     short_name,
                     redefinition,
                     subsets,
+                    qualified_name: None,
                 });
             }
 

@@ -28,6 +28,10 @@ pub struct Diagnostic {
     pub severity: Severity,
     pub code: &'static str,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
 }
 
 impl Diagnostic {
@@ -38,6 +42,8 @@ impl Diagnostic {
             severity: Severity::Error,
             code,
             message,
+            explanation: None,
+            suggestion: None,
         }
     }
 
@@ -48,6 +54,8 @@ impl Diagnostic {
             severity: Severity::Warning,
             code,
             message,
+            explanation: None,
+            suggestion: None,
         }
     }
 
@@ -58,7 +66,21 @@ impl Diagnostic {
             severity: Severity::Note,
             code,
             message,
+            explanation: None,
+            suggestion: None,
         }
+    }
+
+    /// Add an explanation of why this diagnostic was raised.
+    pub fn with_explanation(mut self, explanation: impl Into<String>) -> Self {
+        self.explanation = Some(explanation.into());
+        self
+    }
+
+    /// Add a suggestion for how to fix this diagnostic.
+    pub fn with_suggestion(mut self, suggestion: impl Into<String>) -> Self {
+        self.suggestion = Some(suggestion.into());
+        self
     }
 }
 
