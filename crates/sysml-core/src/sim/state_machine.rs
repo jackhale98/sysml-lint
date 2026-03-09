@@ -60,6 +60,15 @@ pub enum ActionRef {
     Inline(String),
 }
 
+impl std::fmt::Display for Trigger {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Trigger::Signal(s) => write!(f, "{}", s),
+            Trigger::Completion => write!(f, "completion"),
+        }
+    }
+}
+
 impl std::fmt::Display for ActionRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

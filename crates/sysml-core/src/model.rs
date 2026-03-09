@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Span {
     pub start_row: usize,
     pub start_col: usize,
@@ -139,6 +139,67 @@ pub struct Definition {
     pub has_constraint_expr: bool,
     /// Whether a calc def contains a return statement.
     pub has_return: bool,
+    /// Visibility modifier (public/private/protected).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<Visibility>,
+    /// Short name alias (e.g., `<V>` in `part def Vehicle <V>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub short_name: Option<String>,
+    /// Documentation comment text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    /// Whether the definition is abstract.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_abstract: bool,
+    /// Name of the enclosing definition, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_def: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    Public,
+    Private,
+    Protected,
+}
+
+impl Visibility {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::Private => "private",
+            Self::Protected => "protected",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Multiplicity {
+    pub lower: Option<String>,
+    pub upper: Option<String>,
+    pub is_ordered: bool,
+    pub is_nonunique: bool,
+}
+
+impl std::fmt::Display for Multiplicity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        match (&self.lower, &self.upper) {
+            (Some(lo), Some(hi)) => write!(f, "{}..{}", lo, hi)?,
+            (Some(lo), None) => write!(f, "{}", lo)?,
+            (None, Some(hi)) => write!(f, "{}", hi)?,
+            (None, None) => write!(f, "*")?,
+        }
+        write!(f, "]")?;
+        if self.is_ordered {
+            write!(f, " ordered")?;
+        }
+        if self.is_nonunique {
+            write!(f, " nonunique")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -183,6 +244,21 @@ pub struct Usage {
     /// Name of the enclosing definition, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_def: Option<String>,
+    /// Multiplicity (e.g., [0..1], [1..*]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multiplicity: Option<Multiplicity>,
+    /// Default value expression text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_expr: Option<String>,
+    /// Short name alias.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub short_name: Option<String>,
+    /// Redefines target name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redefinition: Option<String>,
+    /// Subsets target name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subsets: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -236,6 +312,19 @@ pub struct TypeReference {
     pub span: Span,
 }
 
+/// A doc comment (e.g., `doc /* description */`).
+#[derive(Debug, Clone, Serialize)]
+pub struct Comment {
+    pub text: String,
+    /// Locale if specified (e.g., `doc locale "en" /* ... */`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+    /// Name of the enclosing definition, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_def: Option<String>,
+    pub span: Span,
+}
+
 /// An import statement (e.g., `import Vehicles::*;`).
 #[derive(Debug, Clone, Serialize)]
 pub struct Import {
@@ -259,6 +348,7 @@ pub struct Model {
     pub syntax_errors: Vec<SyntaxError>,
     pub type_references: Vec<TypeReference>,
     pub imports: Vec<Import>,
+    pub comments: Vec<Comment>,
     /// Names resolved from imports (populated by the resolver).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub resolved_imports: Vec<String>,
@@ -278,6 +368,7 @@ impl Model {
             syntax_errors: Vec::new(),
             type_references: Vec::new(),
             imports: Vec::new(),
+            comments: Vec::new(),
             resolved_imports: Vec::new(),
         }
     }

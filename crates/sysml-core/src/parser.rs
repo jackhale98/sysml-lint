@@ -12,6 +12,38 @@ pub(crate) fn get_language() -> Language {
     unsafe { tree_sitter_sysml() }
 }
 
+/// Dump the CST for debugging.
+pub fn dump_cst(source: &str) -> String {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&get_language())
+        .expect("Failed to set tree-sitter language");
+    let tree = parser
+        .parse(source, None)
+        .expect("Failed to parse source file");
+    fn fmt_node(node: Node, source: &[u8], indent: usize, out: &mut String) {
+        let prefix = "  ".repeat(indent);
+        let text = std::str::from_utf8(&source[node.start_byte()..node.end_byte()]).unwrap_or("");
+        let short = if text.len() > 60 { &text[..60] } else { text };
+        let short = short.replace('\n', "\\n");
+        out.push_str(&format!(
+            "{}{} [{}-{}] «{}»\n",
+            prefix,
+            node.kind(),
+            node.start_position().row,
+            node.end_position().row,
+            short
+        ));
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            fmt_node(child, source, indent + 1, out);
+        }
+    }
+    let mut out = String::new();
+    fmt_node(tree.root_node(), source.as_bytes(), 0, &mut out);
+    out
+}
+
 /// Parse a SysML v2 source file and extract a model.
 pub fn parse_file(file_path: &str, source: &str) -> Model {
     let mut parser = Parser::new();
@@ -227,6 +259,229 @@ fn is_conjugated_type(node: &Node, source: &[u8]) -> bool {
     false
 }
 
+/// Extract visibility modifier from preceding siblings of a node.
+fn get_visibility(node: &Node) -> Option<Visibility> {
+    let mut sibling = node.prev_sibling();
+    while let Some(sib) = sibling {
+        match sib.kind() {
+            "visibility" => {
+                // The visibility node contains a child: public/private/protected
+                let mut cursor = sib.walk();
+                for child in sib.children(&mut cursor) {
+                    match child.kind() {
+                        "public" => return Some(Visibility::Public),
+                        "private" => return Some(Visibility::Private),
+                        "protected" => return Some(Visibility::Protected),
+                        _ => {}
+                    }
+                }
+                return None;
+            }
+            // Stop at structural boundaries
+            k if def_kind_from_node(k).is_some()
+                || usage_kind_from_node(k).is_some()
+                || k == "definition_body"
+                || k == "state_body"
+                || k == "{" => break,
+            _ => {}
+        }
+        sibling = sib.prev_sibling();
+    }
+    None
+}
+
+/// Check if a node has an abstract modifier in preceding siblings.
+fn is_abstract(node: &Node) -> bool {
+    let mut sibling = node.prev_sibling();
+    while let Some(sib) = sibling {
+        match sib.kind() {
+            "abstract" => return true,
+            k if def_kind_from_node(k).is_some()
+                || usage_kind_from_node(k).is_some()
+                || k == "definition_body"
+                || k == "state_body"
+                || k == "{" => break,
+            _ => {}
+        }
+        sibling = sib.prev_sibling();
+    }
+    false
+}
+
+/// Extract short_name from a definition node.
+fn get_short_name(node: &Node, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "short_name" {
+            // short_name contains: < quoted_name >
+            let mut sc = child.walk();
+            for sc_child in child.children(&mut sc) {
+                if sc_child.kind() == "quoted_name" {
+                    return Some(node_text(&sc_child, source).to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract the first doc comment from a definition's body.
+fn get_doc_comment(node: &Node, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "definition_body" {
+            let mut bc = child.walk();
+            for body_child in child.children(&mut bc) {
+                if body_child.kind() == "doc_comment" {
+                    return extract_doc_text(&body_child, source);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract text from a doc_comment node, stripping /* */ delimiters.
+fn extract_doc_text(node: &Node, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "block_comment" {
+            let raw = node_text(&child, source);
+            // Strip /* */ and trim
+            let text = raw
+                .strip_prefix("/*")
+                .unwrap_or(raw)
+                .strip_suffix("*/")
+                .unwrap_or(raw)
+                .trim()
+                .to_string();
+            return Some(text);
+        }
+    }
+    None
+}
+
+/// Extract multiplicity from a usage node.
+fn get_multiplicity(node: &Node, source: &[u8]) -> Option<Multiplicity> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "multiplicity" {
+            return Some(parse_multiplicity(&child, source));
+        }
+    }
+    None
+}
+
+/// Parse a multiplicity node into a Multiplicity struct.
+fn parse_multiplicity(node: &Node, source: &[u8]) -> Multiplicity {
+    let mut lower = None;
+    let mut upper = None;
+    let mut is_ordered = false;
+    let mut is_nonunique = false;
+    let mut saw_dotdot = false;
+    let mut first_expr = None;
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "[" | "]" => {}
+            "*" => {
+                if saw_dotdot {
+                    upper = None; // * means unbounded
+                } else {
+                    // Standalone * — unbounded
+                    return Multiplicity {
+                        lower: None,
+                        upper: None,
+                        is_ordered: false,
+                        is_nonunique: false,
+                    };
+                }
+            }
+            ".." => {
+                saw_dotdot = true;
+                // The first expression becomes the lower bound
+                lower = first_expr.take();
+            }
+            "ordered" => is_ordered = true,
+            "nonunique" => is_nonunique = true,
+            _ => {
+                let text = node_text(&child, source).to_string();
+                if saw_dotdot {
+                    upper = Some(text);
+                } else {
+                    first_expr = Some(text);
+                }
+            }
+        }
+    }
+
+    // If no ".." was seen, the single expression is a lower bound (exact count)
+    if !saw_dotdot {
+        lower = first_expr;
+    }
+
+    Multiplicity {
+        lower,
+        upper,
+        is_ordered,
+        is_nonunique,
+    }
+}
+
+/// Extract value expression from a usage node.
+fn get_value_expr(node: &Node, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "value_assignment" {
+            // Extract just the expression part (skip = or :=)
+            let mut vc = child.walk();
+            for vc_child in child.children(&mut vc) {
+                match vc_child.kind() {
+                    "=" | ":=" | "default" => {}
+                    _ => {
+                        return Some(node_text(&vc_child, source).to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract redefines target from a usage node.
+fn get_redefinition(node: &Node, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "redefines_keyword" {
+            // redefines_keyword contains: redefines <qualified_name>
+            let mut rc = child.walk();
+            for rc_child in child.children(&mut rc) {
+                if rc_child.kind() == "qualified_name" || rc_child.kind() == "identifier" {
+                    return Some(node_text(&rc_child, source).to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract subsets target from a usage node.
+fn get_subsets(node: &Node, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "subsets_keyword" {
+            let mut sc = child.walk();
+            for sc_child in child.children(&mut sc) {
+                if sc_child.kind() == "qualified_name" || sc_child.kind() == "identifier" {
+                    return Some(node_text(&sc_child, source).to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Recursively walk the parse tree and extract model elements.
 fn walk_node(
     node: Node,
@@ -281,6 +536,12 @@ fn walk_node_scoped(
                         (true, 0, false, false)
                     };
 
+                // Extract enriched fields
+                let visibility = get_visibility(&node);
+                let is_abstract_val = is_abstract(&node);
+                let short_name = get_short_name(&node, source);
+                let doc = get_doc_comment(&node, source);
+
                 model.definitions.push(Definition {
                     kind: def_kind,
                     name: name.clone(),
@@ -290,7 +551,22 @@ fn walk_node_scoped(
                     param_count,
                     has_constraint_expr,
                     has_return,
+                    visibility,
+                    short_name,
+                    doc: doc.clone(),
+                    is_abstract: is_abstract_val,
+                    parent_def: parent_def_name.map(|s| s.to_string()),
                 });
+
+                // Collect doc comments as model-level comments
+                if let Some(text) = doc {
+                    model.comments.push(Comment {
+                        text,
+                        locale: None,
+                        parent_def: Some(name.clone()),
+                        span: Span::from_node(&node),
+                    });
+                }
 
                 // Recurse into definition body with scope tracking
                 let ev = if def_kind == DefKind::Verification {
@@ -319,6 +595,11 @@ fn walk_node_scoped(
                 }
                 let direction = get_direction(&node);
                 let conjugated = is_conjugated_type(&node, source);
+                let multiplicity = get_multiplicity(&node, source);
+                let value_expr = get_value_expr(&node, source);
+                let short_name = get_short_name(&node, source);
+                let redefinition = get_redefinition(&node, source);
+                let subsets = get_subsets(&node, source);
                 model.usages.push(Usage {
                     kind: usage_kind.to_string(),
                     name,
@@ -327,6 +608,11 @@ fn walk_node_scoped(
                     direction,
                     is_conjugated: conjugated,
                     parent_def: parent_def_name.map(|s| s.to_string()),
+                    multiplicity,
+                    value_expr,
+                    short_name,
+                    redefinition,
+                    subsets,
                 });
             }
 

@@ -1,10 +1,12 @@
 use std::path::Path;
 
 fn main() {
-    // Look for tree-sitter-sysml grammar source in multiple locations
+    // Look for tree-sitter-sysml grammar source relative to workspace root.
+    // Build scripts run from the crate directory (crates/sysml-core/),
+    // so we look up two levels to the workspace root.
     let candidates = [
-        "tree-sitter-sysml/src",     // vendored / submodule
-        "../tree-sitter-sysml/src",  // sibling directory
+        "../../tree-sitter-sysml/src",    // submodule in workspace root
+        "../../../tree-sitter-sysml/src", // sibling of workspace root
     ];
 
     let grammar_dir = candidates

@@ -1,0 +1,25 @@
+//! SysML v2 parser, validator, simulator, and model query engine.
+//!
+//! This crate provides the core logic for working with SysML v2 models.
+//! It is frontend-agnostic — no CLI, GUI, or I/O dependencies. All public
+//! functions take data in and return data out.
+//!
+//! # Modules
+//!
+//! - [`model`] — Data types for SysML v2 model elements (definitions, usages, relationships)
+//! - [`parser`] — Tree-sitter based parsing of SysML v2 textual notation
+//! - [`resolver`] — Multi-file import resolution
+//! - [`diagnostic`] — Diagnostic types and error codes
+//! - [`checks`] — Validation checks (lint rules)
+//! - [`sim`] — Simulation engine (constraints, state machines, action flows)
+//! - [`export`] — Export to FMI, Modelica, and SSP formats
+
+pub mod checks;
+pub mod diagram;
+pub mod diagnostic;
+pub mod export;
+pub mod model;
+pub mod parser;
+pub mod query;
+pub mod resolver;
+pub mod sim;

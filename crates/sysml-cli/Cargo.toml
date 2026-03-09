@@ -1,0 +1,17 @@
+[package]
+name = "sysml-cli"
+version = "0.3.0"
+edition = "2021"
+description = "SysML v2 command-line tool for validation, simulation, diagram generation, and model management"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/jackhale98/sysml-cli"
+
+[dependencies]
+sysml-core = { path = "../sysml-core" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+
+[[bin]]
+name = "sysml-cli"
+path = "src/main.rs"

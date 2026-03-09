@@ -1,6 +1,6 @@
-/// Output formatting for diagnostics.
+/// Output formatting for diagnostics and simulation results.
 
-use crate::diagnostic::{Diagnostic, Severity};
+use sysml_core::diagnostic::{Diagnostic, Severity};
 
 /// Format diagnostics as human-readable text.
 pub fn format_text(diagnostics: &[Diagnostic]) -> String {
