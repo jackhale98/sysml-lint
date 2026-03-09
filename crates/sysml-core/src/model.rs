@@ -154,6 +154,12 @@ pub struct Definition {
     /// Name of the enclosing definition, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_def: Option<String>,
+    /// Byte offset of the opening `{` of the definition body.
+    #[serde(skip)]
+    pub body_start_byte: Option<usize>,
+    /// Byte offset of the closing `}` of the definition body.
+    #[serde(skip)]
+    pub body_end_byte: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -334,6 +340,17 @@ pub struct Import {
     pub span: Span,
 }
 
+/// A parsed view definition with its expose and filter clauses.
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewDef {
+    pub name: String,
+    /// Exposed qualified names (e.g., "Vehicle::*", "P::**").
+    pub exposes: Vec<String>,
+    /// Kind filters extracted from filter statements (e.g., "part", "port").
+    pub kind_filters: Vec<String>,
+    pub span: Span,
+}
+
 /// Complete model extracted from a SysML v2 file.
 #[derive(Debug, Clone, Serialize)]
 pub struct Model {
@@ -349,6 +366,7 @@ pub struct Model {
     pub type_references: Vec<TypeReference>,
     pub imports: Vec<Import>,
     pub comments: Vec<Comment>,
+    pub views: Vec<ViewDef>,
     /// Names resolved from imports (populated by the resolver).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub resolved_imports: Vec<String>,
@@ -369,6 +387,7 @@ impl Model {
             type_references: Vec::new(),
             imports: Vec::new(),
             comments: Vec::new(),
+            views: Vec::new(),
             resolved_imports: Vec::new(),
         }
     }

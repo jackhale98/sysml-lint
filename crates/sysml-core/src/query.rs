@@ -184,6 +184,71 @@ pub fn list_elements<'a>(model: &'a Model, filter: &ListFilter) -> Vec<Element<'
 }
 
 // ========================================================================
+// View-based filtering
+// ========================================================================
+
+/// Apply a named view definition's filters to build a `ListFilter`.
+///
+/// Looks up the view by name in the model, then converts its expose/filter
+/// clauses into a `ListFilter`. Returns None if the view is not found.
+pub fn filter_from_view(model: &Model, view_name: &str) -> Option<ListFilter> {
+    let view = model.views.iter().find(|v| v.name == view_name)?;
+    let mut filter = ListFilter::default();
+
+    // Apply kind filters from the view
+    if let Some(kind_str) = view.kind_filters.first() {
+        filter.kind = parse_kind_filter(kind_str);
+    }
+
+    // Apply expose scope — if an expose targets "Foo::*", set parent=Foo
+    for expose in &view.exposes {
+        if let Some(base) = expose.strip_suffix("::*").or_else(|| expose.strip_suffix("::**")) {
+            filter.parent = Some(base.to_string());
+            break;
+        }
+    }
+
+    Some(filter)
+}
+
+/// Parse a kind string into a `KindFilter` (reusable helper).
+pub fn parse_kind_filter(s: &str) -> Option<KindFilter> {
+    match s.to_lowercase().as_str() {
+        "all" => Some(KindFilter::All),
+        "definitions" | "defs" => Some(KindFilter::Definitions),
+        "usages" => Some(KindFilter::Usages),
+        // Definition kinds (plural form)
+        "parts" => Some(KindFilter::DefKind(DefKind::Part)),
+        "ports" => Some(KindFilter::DefKind(DefKind::Port)),
+        "actions" => Some(KindFilter::DefKind(DefKind::Action)),
+        "states" => Some(KindFilter::DefKind(DefKind::State)),
+        "requirements" => Some(KindFilter::DefKind(DefKind::Requirement)),
+        "constraints" => Some(KindFilter::DefKind(DefKind::Constraint)),
+        "connections" => Some(KindFilter::DefKind(DefKind::Connection)),
+        "interfaces" => Some(KindFilter::DefKind(DefKind::Interface)),
+        "flows" => Some(KindFilter::DefKind(DefKind::Flow)),
+        "calculations" | "calcs" => Some(KindFilter::DefKind(DefKind::Calc)),
+        "views" => Some(KindFilter::DefKind(DefKind::View)),
+        "viewpoints" => Some(KindFilter::DefKind(DefKind::Viewpoint)),
+        "enums" => Some(KindFilter::DefKind(DefKind::Enum)),
+        "packages" => Some(KindFilter::DefKind(DefKind::Package)),
+        "attributes" | "attrs" => Some(KindFilter::DefKind(DefKind::Attribute)),
+        "items" => Some(KindFilter::DefKind(DefKind::Item)),
+        // Usage kinds (singular form)
+        "part" => Some(KindFilter::UsageKind("part".to_string())),
+        "port" => Some(KindFilter::UsageKind("port".to_string())),
+        "action" => Some(KindFilter::UsageKind("action".to_string())),
+        "state" => Some(KindFilter::UsageKind("state".to_string())),
+        "requirement" => Some(KindFilter::UsageKind("requirement".to_string())),
+        "constraint" => Some(KindFilter::UsageKind("constraint".to_string())),
+        "attribute" | "attr" => Some(KindFilter::UsageKind("attribute".to_string())),
+        "item" => Some(KindFilter::UsageKind("item".to_string())),
+        "connection" => Some(KindFilter::UsageKind("connection".to_string())),
+        _ => None,
+    }
+}
+
+// ========================================================================
 // Requirements traceability
 // ========================================================================
 
@@ -510,5 +575,33 @@ mod tests {
         assert_eq!(ports.len(), 2);
         assert!(ports.iter().any(|p| p.name == "fuelIn" && p.owner == "Vehicle"));
         assert!(ports.iter().any(|p| p.name == "fuelOut" && p.owner == "Station"));
+    }
+
+    #[test]
+    fn view_filter_with_expose() {
+        let model = parse_file(
+            "test.sysml",
+            r#"
+            package Pkg {
+                part def Vehicle;
+                part def Engine;
+            }
+            part def Unrelated;
+            view def PkgView {
+                expose Pkg::*;
+            }
+        "#,
+        );
+        assert!(!model.views.is_empty());
+        let vf = filter_from_view(&model, "PkgView").unwrap();
+        assert_eq!(vf.parent.as_deref(), Some("Pkg"));
+    }
+
+    #[test]
+    fn parse_kind_filter_values() {
+        assert_eq!(parse_kind_filter("parts"), Some(KindFilter::DefKind(DefKind::Part)));
+        assert_eq!(parse_kind_filter("port"), Some(KindFilter::UsageKind("port".to_string())));
+        assert_eq!(parse_kind_filter("all"), Some(KindFilter::All));
+        assert_eq!(parse_kind_filter("nonsense"), None);
     }
 }

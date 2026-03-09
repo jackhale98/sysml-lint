@@ -15,6 +15,7 @@
 //! - [`export`] — Export to FMI, Modelica, and SSP formats
 
 pub mod checks;
+pub mod codegen;
 pub mod diagram;
 pub mod diagnostic;
 pub mod export;

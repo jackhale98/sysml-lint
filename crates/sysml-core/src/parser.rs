@@ -541,6 +541,7 @@ fn walk_node_scoped(
                 let is_abstract_val = is_abstract(&node);
                 let short_name = get_short_name(&node, source);
                 let doc = get_doc_comment(&node, source);
+                let (body_start_byte, body_end_byte) = get_body_braces(&node);
 
                 model.definitions.push(Definition {
                     kind: def_kind,
@@ -556,6 +557,8 @@ fn walk_node_scoped(
                     doc: doc.clone(),
                     is_abstract: is_abstract_val,
                     parent_def: parent_def_name.map(|s| s.to_string()),
+                    body_start_byte,
+                    body_end_byte,
                 });
 
                 // Collect doc comments as model-level comments
@@ -566,6 +569,12 @@ fn walk_node_scoped(
                         parent_def: Some(name.clone()),
                         span: Span::from_node(&node),
                     });
+                }
+
+                // Extract view definition body (expose/filter)
+                if def_kind == DefKind::View {
+                    let view = extract_view_body(&node, source, &name);
+                    model.views.push(view);
                 }
 
                 // Recurse into definition body with scope tracking
@@ -765,6 +774,93 @@ fn extract_allocation(node: &Node, source: &[u8], model: &mut Model) {
 
 /// Inspect a constraint or calc definition body for structural elements.
 /// Returns (has_body, param_count, has_constraint_expr, has_return).
+/// Extract the byte positions of the opening `{` and closing `}` of a definition body.
+fn get_body_braces(node: &Node) -> (Option<usize>, Option<usize>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "definition_body" || child.kind() == "state_body" {
+            let mut body_cursor = child.walk();
+            let mut open = None;
+            let mut close = None;
+            for body_child in child.children(&mut body_cursor) {
+                if body_child.kind() == "{" {
+                    open = Some(body_child.start_byte());
+                } else if body_child.kind() == "}" {
+                    close = Some(body_child.start_byte());
+                }
+            }
+            return (open, close);
+        }
+    }
+    (None, None)
+}
+
+/// Extract expose and filter clauses from a view definition body.
+fn extract_view_body(node: &Node, source: &[u8], name: &str) -> ViewDef {
+    let mut exposes = Vec::new();
+    let mut kind_filters = Vec::new();
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        visit_view_body_node(&child, source, &mut exposes, &mut kind_filters);
+    }
+
+    ViewDef {
+        name: name.to_string(),
+        exposes,
+        kind_filters,
+        span: Span::from_node(node),
+    }
+}
+
+fn visit_view_body_node(
+    node: &Node,
+    source: &[u8],
+    exposes: &mut Vec<String>,
+    kind_filters: &mut Vec<String>,
+) {
+    match node.kind() {
+        "expose_statement" => {
+            // Collect the full text of the expose, extracting the qualified name
+            let text = node_text(node, source).trim().to_string();
+            // Parse out the qualified name from "expose QualifiedName::*;"
+            let stripped = text
+                .strip_prefix("expose ")
+                .unwrap_or(&text)
+                .trim_end_matches(';')
+                .trim();
+            if !stripped.is_empty() {
+                exposes.push(stripped.to_string());
+            }
+        }
+        "filter_statement" => {
+            // Try to extract kind filters from filter statements
+            // Look for patterns like: filter @SysML::Metadata::KindFilter {kind = part;}
+            // or simpler usage-kind patterns
+            let text = node_text(node, source).trim().to_string();
+            // Extract kind= value if present
+            if let Some(pos) = text.find("kind") {
+                let after = &text[pos + 4..];
+                let after = after.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let kind_val: String = after
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !kind_val.is_empty() {
+                    kind_filters.push(kind_val);
+                }
+            }
+        }
+        _ => {
+            // Recurse into child nodes
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                visit_view_body_node(&child, source, exposes, kind_filters);
+            }
+        }
+    }
+}
+
 fn inspect_def_body(node: &Node, kind: DefKind) -> (bool, usize, bool, bool) {
     let mut has_body = false;
     let mut param_count = 0;
