@@ -55,148 +55,158 @@ sysml example brake-system -o /tmp/brake-example
 
 This creates multiple `.sysml` files with teaching comments. Feel free to explore them.
 
-## Part 2: Creating the Model
+## Part 2: Building the Model with CLI Commands
 
-### 2.1 Create the main model file
+We will build the weather station model incrementally using `sysml add`. This shows the CLI-first workflow — you never need to write SysML syntax by hand.
 
-SysML v2 uses a textual notation. Create a file called `model.sysml`:
+### 2.1 Create a seed file
+
+Start with a minimal package wrapper. This is the only hand-written SysML in this tutorial:
+
+```sh
+cat > model.sysml << 'EOF'
+package WeatherStation {
+}
+EOF
+```
+
+### 2.2 Add attribute definitions
+
+Create reusable value types:
+
+```sh
+sysml add model.sysml attribute-def TemperatureValue
+sysml add model.sysml attribute-def HumidityValue
+sysml add model.sysml attribute-def PressureValue
+sysml add model.sysml attribute-def WindSpeedValue
+```
+
+### 2.3 Add enum definitions
+
+Create enumerations. The `add` command creates the definition; enum members need to be added inside the body:
+
+```sh
+sysml add model.sysml enum-def DisplayMode
+sysml add model.sysml enum-def SensorStatus
+```
+
+> **Note:** Enum members (`enum summary;`, `enum detailed;`, etc.) are not yet supported by `sysml add`. After creating the enum definitions, add the members by hand or use `sysml add --stdout enum-def DisplayMode` to preview the structure and edit the file.
+
+### 2.4 Add port definitions with members
+
+Create ports with directional items using the `-m` flag:
+
+```sh
+sysml add model.sysml port-def SensorDataPort \
+    -m "out item reading:ScalarValues::Real"
+
+sysml add model.sysml port-def DisplayDataPort \
+    -m "in item displayValue:ScalarValues::Real"
+
+sysml add model.sysml port-def PowerPort \
+    -m "in item voltage:ScalarValues::Real"
+```
+
+### 2.5 Add part definitions
+
+Create an abstract base sensor type with ports and attributes:
+
+```sh
+sysml add model.sysml part-def Sensor --abstract \
+    --doc "Base type for all sensors" \
+    -m "attribute status:SensorStatus" \
+    -m "attribute sampleRate:ScalarValues::Real" \
+    -m "port dataOut:SensorDataPort" \
+    -m "port power:PowerPort"
+```
+
+Create specialized sensor types that extend the base:
+
+```sh
+sysml add model.sysml part-def TemperatureSensor --extends Sensor \
+    --doc "Measures ambient temperature in degrees Celsius" \
+    -m "attribute range_min:ScalarValues::Real" \
+    -m "attribute range_max:ScalarValues::Real"
+
+sysml add model.sysml part-def HumiditySensor --extends Sensor \
+    --doc "Measures relative humidity as a percentage" \
+    -m "attribute accuracy:ScalarValues::Real"
+
+sysml add model.sysml part-def PressureSensor --extends Sensor \
+    --doc "Measures barometric pressure in hPa"
+
+sysml add model.sysml part-def WindSensor --extends Sensor \
+    --doc "Measures wind speed in m/s and direction" \
+    -m "attribute maxSpeed:ScalarValues::Real"
+```
+
+Create the controller, display, power supply, and enclosure:
+
+```sh
+sysml add model.sysml part-def Controller \
+    --doc "Central processing unit that reads sensor data and drives the display" \
+    -m "attribute firmware_version:ScalarValues::String"
+
+sysml add model.sysml part-def Display \
+    --doc "LCD display for showing weather readings" \
+    -m "port dataIn:DisplayDataPort" \
+    -m "port power:PowerPort" \
+    -m "attribute mode:DisplayMode" \
+    -m "attribute brightness:ScalarValues::Real"
+
+sysml add model.sysml part-def PowerSupply \
+    --doc "Solar-powered battery pack" \
+    -m "attribute capacity_ah:ScalarValues::Real" \
+    -m "attribute voltage:ScalarValues::Real"
+
+sysml add model.sysml part-def Enclosure \
+    --doc "Weather-resistant outdoor housing" \
+    -m "attribute material:ScalarValues::String" \
+    -m "attribute ip_rating:ScalarValues::String"
+```
+
+### 2.6 Preview before committing
+
+Use `--dry-run` to see what would change before writing:
+
+```sh
+sysml add model.sysml part-def ConnectionDef --dry-run
+```
+
+Or generate to stdout to inspect the SysML text:
+
+```sh
+sysml add --stdout part-def ConnectionDef \
+    -m "part source:Sensor" -m "part target:Controller"
+```
+
+### 2.7 Add the main assembly
+
+Create the top-level assembly definition:
+
+```sh
+sysml add model.sysml part-def WeatherStationUnit \
+    --doc "Complete weather station assembly"
+```
+
+Add part usages inside it with `--inside`:
+
+```sh
+sysml add model.sysml part tempSensor -t TemperatureSensor --inside WeatherStationUnit
+sysml add model.sysml part humiditySensor -t HumiditySensor --inside WeatherStationUnit
+sysml add model.sysml part pressureSensor -t PressureSensor --inside WeatherStationUnit
+sysml add model.sysml part windSensor -t WindSensor --inside WeatherStationUnit
+sysml add model.sysml part controller -t Controller --inside WeatherStationUnit
+sysml add model.sysml part display -t Display --inside WeatherStationUnit
+sysml add model.sysml part power -t PowerSupply --inside WeatherStationUnit
+sysml add model.sysml part enclosure -t Enclosure --inside WeatherStationUnit
+```
+
+### 2.8 Add connections (hand-edit)
+
+Connection usages with `connect ... to ...` binding syntax are not yet supported by `sysml add`. Add these inside the `WeatherStationUnit` body by hand:
 
 ```sysml
-// Weather Station Model
-// A small embedded system for environmental monitoring
-
-package WeatherStation {
-
-    // ---------------------------------------------------------------
-    // Attribute definitions — reusable value types
-    // ---------------------------------------------------------------
-
-    attribute def TemperatureValue;
-    attribute def HumidityValue;
-    attribute def PressureValue;
-    attribute def WindSpeedValue;
-
-    // ---------------------------------------------------------------
-    // Enumeration — fixed set of choices
-    // ---------------------------------------------------------------
-
-    enum def DisplayMode {
-        enum summary;
-        enum detailed;
-        enum alert;
-    }
-
-    enum def SensorStatus {
-        enum ok;
-        enum degraded;
-        enum failed;
-    }
-
-    // ---------------------------------------------------------------
-    // Port definitions — interaction points
-    // ---------------------------------------------------------------
-
-    port def SensorDataPort {
-        out item reading : ScalarValues::Real;
-    }
-
-    port def DisplayDataPort {
-        in item displayValue : ScalarValues::Real;
-    }
-
-    port def PowerPort {
-        in item voltage : ScalarValues::Real;
-    }
-
-    // ---------------------------------------------------------------
-    // Part definitions — reusable component types
-    // ---------------------------------------------------------------
-
-    abstract part def Sensor {
-        doc /* Base type for all sensors */
-        attribute status : SensorStatus;
-        attribute sampleRate : ScalarValues::Real;
-        port dataOut : SensorDataPort;
-        port power : PowerPort;
-    }
-
-    part def TemperatureSensor :> Sensor {
-        doc /* Measures ambient temperature in degrees Celsius */
-        attribute range_min : ScalarValues::Real;
-        attribute range_max : ScalarValues::Real;
-    }
-
-    part def HumiditySensor :> Sensor {
-        doc /* Measures relative humidity as a percentage */
-        attribute accuracy : ScalarValues::Real;
-    }
-
-    part def PressureSensor :> Sensor {
-        doc /* Measures barometric pressure in hPa */
-    }
-
-    part def WindSensor :> Sensor {
-        doc /* Measures wind speed in m/s and direction */
-        attribute maxSpeed : ScalarValues::Real;
-    }
-
-    part def Controller {
-        doc /* Central processing unit that reads sensor data and drives the display */
-        port tempIn : ~SensorDataPort;
-        port humidIn : ~SensorDataPort;
-        port pressIn : ~SensorDataPort;
-        port windIn : ~SensorDataPort;
-        port displayOut : ~DisplayDataPort;
-        port power : PowerPort;
-        attribute firmware_version : ScalarValues::String;
-    }
-
-    part def Display {
-        doc /* LCD display for showing weather readings */
-        port dataIn : DisplayDataPort;
-        port power : PowerPort;
-        attribute mode : DisplayMode;
-        attribute brightness : ScalarValues::Real;
-    }
-
-    part def PowerSupply {
-        doc /* Solar-powered battery pack */
-        attribute capacity_ah : ScalarValues::Real;
-        attribute voltage : ScalarValues::Real;
-    }
-
-    part def Enclosure {
-        doc /* Weather-resistant outdoor housing */
-        attribute material : ScalarValues::String;
-        attribute ip_rating : ScalarValues::String;
-    }
-
-    // ---------------------------------------------------------------
-    // Connection definition
-    // ---------------------------------------------------------------
-
-    connection def SensorConnection {
-        end source : Sensor;
-        end target : Controller;
-    }
-
-    // ---------------------------------------------------------------
-    // Main assembly
-    // ---------------------------------------------------------------
-
-    part def WeatherStationUnit {
-        doc /* Complete weather station assembly */
-
-        part tempSensor : TemperatureSensor;
-        part humiditySensor : HumiditySensor;
-        part pressureSensor : PressureSensor;
-        part windSensor : WindSensor;
-        part controller : Controller;
-        part display : Display;
-        part power : PowerSupply;
-        part enclosure : Enclosure;
-
-        // Sensor-to-controller connections
         connection tempConn : SensorConnection
             connect tempSensor.dataOut to controller.tempIn;
 
@@ -209,14 +219,23 @@ package WeatherStation {
         connection windConn : SensorConnection
             connect windSensor.dataOut to controller.windIn;
 
-        // Controller-to-display connection
         connection displayConn
             connect controller.displayOut to display.dataIn;
-    }
-}
 ```
 
-### 2.2 Validate the model
+> **Future work:** `sysml add` will support connection bindings in a future release.
+
+### 2.9 Learn SysML syntax with --teach
+
+If you are new to SysML v2, use `--teach` to see explanatory comments alongside generated code:
+
+```sh
+sysml add --stdout --teach part-def Motor
+```
+
+This produces annotated SysML with comments explaining each language construct.
+
+### 2.10 Validate the model
 
 Run the linter to check for structural issues:
 
@@ -232,77 +251,48 @@ model.sysml:X:Y: note[W001]: part def `Enclosure` is defined but never reference
 Found 0 errors, N warnings, M notes.
 ```
 
-Notes about unused definitions are normal at this stage — we have not added requirements or verification yet.
-
-To suppress notes and only see warnings and errors:
+Notes about unused definitions are normal at this stage — we have not added requirements or verification yet. To suppress notes:
 
 ```sh
 sysml lint --severity warning model.sysml
 ```
 
-### 2.3 List model elements
+### 2.11 Explore the model
 
-View all definitions and usages:
+List all elements:
 
 ```sh
 sysml list model.sysml
-```
-
-Filter by kind:
-
-```sh
 sysml list --kind parts model.sysml       # part definitions only
 sysml list --kind ports model.sysml       # port definitions only
-sysml list --kind requirements model.sysml # (none yet)
-```
-
-Filter by parent:
-
-```sh
 sysml list --parent WeatherStationUnit model.sysml
 ```
 
-### 2.4 Inspect a specific element
+Inspect a specific element:
 
 ```sh
 sysml show model.sysml WeatherStationUnit
+sysml show --raw model.sysml TemperatureSensor   # raw SysML source text
 ```
 
-Output shows the kind, location, members, and relationships. To extract the raw SysML source text:
-
-```sh
-sysml show --raw model.sysml TemperatureSensor
-```
-
-### 2.5 View model statistics
+View model statistics:
 
 ```sh
 sysml stats model.sysml
 ```
 
-This shows element counts by kind, relationship counts, documentation coverage, and nesting depth.
+## Part 3: Editing the Model
 
-## Part 3: Adding Elements with the CLI
+### 3.1 Add a new sensor
 
-The `sysml add` command can insert elements into files without hand-editing SysML syntax.
-
-### 3.1 Add a new part definition
+Extend the model with a rain gauge sensor:
 
 ```sh
 sysml add model.sysml part-def RainGauge --doc "Measures rainfall in mm/hr" --extends Sensor
-```
-
-This inserts a new `part def RainGauge :> Sensor` at the end of the file.
-
-### 3.2 Add a usage inside a definition
-
-```sh
 sysml add model.sysml part rainGauge -t RainGauge --inside WeatherStationUnit
 ```
 
-This adds `part rainGauge : RainGauge;` inside the `WeatherStationUnit` definition body.
-
-### 3.3 Preview changes with --dry-run
+### 3.2 Preview changes with --dry-run
 
 Before writing, preview the diff:
 
@@ -310,7 +300,7 @@ Before writing, preview the diff:
 sysml add model.sysml part-def Anemometer --doc "Wind direction sensor" --dry-run
 ```
 
-### 3.4 Generate to stdout
+### 3.3 Generate to stdout
 
 Generate SysML text without modifying any file:
 
@@ -329,15 +319,7 @@ part def GPSSensor {
 }
 ```
 
-### 3.5 Learn SysML syntax with --teach
-
-If you are learning SysML v2, add `--teach` to get explanatory comments:
-
-```sh
-sysml add --stdout --teach part-def Motor
-```
-
-### 3.6 Remove and rename elements
+### 3.4 Remove and rename elements
 
 Remove an element:
 
