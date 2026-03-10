@@ -619,3 +619,72 @@ fn completions_zsh() {
         .success()
         .stdout(predicate::str::contains("sysml"));
 }
+
+// ========================================================================
+// lint suggestions ("did you mean")
+// ========================================================================
+
+#[test]
+fn lint_suggests_closest_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("typo.sysml");
+    fs::write(&file, "part def Vehicle;\npart car : Vehicel;\n").unwrap();
+
+    cmd()
+        .args(["lint", file.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("did you mean `Vehicle`?"));
+}
+
+// ========================================================================
+// quality
+// ========================================================================
+
+#[test]
+fn quality_list() {
+    cmd()
+        .args(["quality", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("NCR"))
+        .stdout(predicate::str::contains("CAPA"))
+        .stdout(predicate::str::contains("Process Deviation"));
+}
+
+#[test]
+fn quality_trend_no_files() {
+    cmd()
+        .args(["quality", "trend"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Trend Analysis"));
+}
+
+#[test]
+fn quality_create_requires_terminal() {
+    // Non-interactive invocation should fail gracefully
+    cmd()
+        .args(["quality", "create", "--type", "ncr"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("interactive terminal"));
+}
+
+#[test]
+fn quality_rca_requires_terminal() {
+    cmd()
+        .args(["quality", "rca", "--source", "NCR-001", "--method", "five-why"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("interactive terminal"));
+}
+
+#[test]
+fn quality_action_requires_terminal() {
+    cmd()
+        .args(["quality", "action", "--capa", "CAPA-001"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("interactive terminal"));
+}

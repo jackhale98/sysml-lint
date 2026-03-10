@@ -140,6 +140,82 @@ pub fn set_root_cause(capa: &mut Capa, root_cause: &str) {
     }
 }
 
+/// Build wizard steps for adding a corrective/preventive action to a CAPA.
+pub fn build_action_wizard_steps() -> Vec<sysml_core::interactive::WizardStep> {
+    use sysml_core::interactive::WizardStep;
+
+    vec![
+        WizardStep::choice("action_type", "Action type", vec![
+            ("design_change", "Design Change"),
+            ("process_change", "Process Change"),
+            ("supplier_change", "Supplier Change"),
+            ("tooling_change", "Tooling Change"),
+            ("training", "Training/Retraining"),
+            ("procedure_update", "Procedure Update"),
+            ("inspection", "Inspection Enhancement"),
+            ("containment", "Containment (immediate)"),
+            ("no_action", "No Action Required"),
+        ]).with_explanation(
+            "Select the type of action that addresses the root cause. \
+             Containment actions are immediate; others are systemic fixes."
+        ),
+        WizardStep::string("description", "Action description")
+            .with_explanation("What specifically will be done?"),
+        WizardStep::string("owner", "Action owner (responsible person)")
+            .with_default("engineer"),
+        WizardStep::string("due_date", "Due date (YYYY-MM-DD)")
+            .with_explanation("When must this action be completed?"),
+        WizardStep::string("verification_ref", "Verification reference (Enter to skip)")
+            .with_explanation(
+                "If this action needs to be verified, enter the verification case \
+                 or test plan reference."
+            )
+            .optional(),
+    ]
+}
+
+/// Interpret a completed action wizard result into a [`CapaAction`].
+pub fn interpret_action_result(
+    result: &sysml_core::interactive::WizardResult,
+    action_id: &str,
+) -> CapaAction {
+    let action_type = match result.get_string("action_type").unwrap_or("procedure_update") {
+        "design_change" => CorrectiveActionType::DesignChange,
+        "process_change" => CorrectiveActionType::ProcessChange,
+        "supplier_change" => CorrectiveActionType::SupplierChange,
+        "tooling_change" => CorrectiveActionType::ToolingChange,
+        "training" => CorrectiveActionType::TrainingRetraining,
+        "procedure_update" => CorrectiveActionType::ProcedureUpdate,
+        "inspection" => CorrectiveActionType::InspectionEnhancement,
+        "containment" => CorrectiveActionType::Containment,
+        "no_action" => CorrectiveActionType::NoActionRequired,
+        _ => CorrectiveActionType::ProcedureUpdate,
+    };
+
+    let description = result.get_string("description")
+        .unwrap_or("")
+        .to_string();
+    let owner = result.get_string("owner")
+        .unwrap_or("engineer")
+        .to_string();
+    let due_date = result.get_string("due_date")
+        .unwrap_or("")
+        .to_string();
+    let verification_ref = result.get_string("verification_ref")
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    CapaAction {
+        id: action_id.to_string(),
+        action_type,
+        description,
+        owner,
+        due_date,
+        completed: false,
+        verification_ref,
+    }
+}
+
 /// Create a [`RecordEnvelope`] for a CAPA.
 pub fn create_capa_record(capa: &Capa, author: &str) -> RecordEnvelope {
     let id = generate_record_id("quality", "capa", author);
@@ -289,5 +365,89 @@ mod tests {
         let json = serde_json::to_string(&capa).unwrap();
         assert!(json.contains("\"preventive\""));
         assert!(json.contains("\"process_improvement\""));
+    }
+
+    #[test]
+    fn action_wizard_step_count() {
+        let steps = build_action_wizard_steps();
+        assert_eq!(steps.len(), 5);
+    }
+
+    #[test]
+    fn action_wizard_step_ids() {
+        let steps = build_action_wizard_steps();
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["action_type", "description", "owner", "due_date", "verification_ref"]);
+    }
+
+    #[test]
+    fn action_wizard_verification_ref_optional() {
+        let steps = build_action_wizard_steps();
+        let vr = steps.iter().find(|s| s.id == "verification_ref").unwrap();
+        assert!(!vr.required);
+    }
+
+    #[test]
+    fn interpret_action_result_basic() {
+        use sysml_core::interactive::{WizardResult, WizardAnswer};
+
+        let mut result = WizardResult::new();
+        result.set("action_type", WizardAnswer::String("procedure_update".into()));
+        result.set("description", WizardAnswer::String("Update turning SOP".into()));
+        result.set("owner", WizardAnswer::String("bob".into()));
+        result.set("due_date", WizardAnswer::String("2026-04-01".into()));
+        result.set("verification_ref", WizardAnswer::Skipped);
+
+        let action = interpret_action_result(&result, "CA-001");
+        assert_eq!(action.id, "CA-001");
+        assert_eq!(action.action_type, CorrectiveActionType::ProcedureUpdate);
+        assert_eq!(action.description, "Update turning SOP");
+        assert_eq!(action.owner, "bob");
+        assert_eq!(action.due_date, "2026-04-01");
+        assert!(!action.completed);
+        assert!(action.verification_ref.is_none());
+    }
+
+    #[test]
+    fn interpret_action_result_with_verification() {
+        use sysml_core::interactive::{WizardResult, WizardAnswer};
+
+        let mut result = WizardResult::new();
+        result.set("action_type", WizardAnswer::String("design_change".into()));
+        result.set("description", WizardAnswer::String("Redesign bracket".into()));
+        result.set("owner", WizardAnswer::String("alice".into()));
+        result.set("due_date", WizardAnswer::String("2026-05-15".into()));
+        result.set("verification_ref", WizardAnswer::String("VC-042".into()));
+
+        let action = interpret_action_result(&result, "CA-002");
+        assert_eq!(action.action_type, CorrectiveActionType::DesignChange);
+        assert_eq!(action.verification_ref.as_deref(), Some("VC-042"));
+    }
+
+    #[test]
+    fn interpret_action_all_types() {
+        use sysml_core::interactive::{WizardResult, WizardAnswer};
+
+        let type_map = vec![
+            ("design_change", CorrectiveActionType::DesignChange),
+            ("process_change", CorrectiveActionType::ProcessChange),
+            ("supplier_change", CorrectiveActionType::SupplierChange),
+            ("tooling_change", CorrectiveActionType::ToolingChange),
+            ("training", CorrectiveActionType::TrainingRetraining),
+            ("inspection", CorrectiveActionType::InspectionEnhancement),
+            ("containment", CorrectiveActionType::Containment),
+            ("no_action", CorrectiveActionType::NoActionRequired),
+        ];
+
+        for (input, expected) in type_map {
+            let mut result = WizardResult::new();
+            result.set("action_type", WizardAnswer::String(input.into()));
+            result.set("description", WizardAnswer::String("desc".into()));
+            result.set("owner", WizardAnswer::String("x".into()));
+            result.set("due_date", WizardAnswer::String("2026-01-01".into()));
+
+            let action = interpret_action_result(&result, "test");
+            assert_eq!(action.action_type, expected, "failed for input '{input}'");
+        }
     }
 }

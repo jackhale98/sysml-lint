@@ -31,8 +31,9 @@ pub mod trend;
 pub use enums::*;
 pub use ncr::{Ncr, create_ncr, create_ncr_record, disposition_ncr, link_capa};
 pub use capa::{Capa, CapaAction, CapaSource, CapaType, create_capa, create_capa_record,
-               add_action, set_root_cause};
+               add_action, set_root_cause, build_action_wizard_steps, interpret_action_result};
 pub use deviation::{ProcessDeviation, create_deviation, create_deviation_record,
                     approve_deviation, deny_deviation, activate_deviation};
-pub use rca::{RootCauseAnalysis, build_five_why_steps, build_fishbone_steps, create_rca_record};
+pub use rca::{RootCauseAnalysis, build_five_why_steps, build_fishbone_steps, create_rca_record,
+              interpret_rca_result};
 pub use trend::{TrendItem, trend_analysis, check_escalation};

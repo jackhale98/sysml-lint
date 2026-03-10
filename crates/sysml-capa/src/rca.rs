@@ -140,6 +140,50 @@ pub fn build_fishbone_steps() -> Vec<WizardStep> {
     ]
 }
 
+/// Interpret a completed RCA wizard result into a [`RootCauseAnalysis`].
+///
+/// For 5 Why: collects `why_1` through `why_5` as findings, plus `root_cause`.
+/// For Fishbone: collects non-empty category answers as findings, plus `root_cause`.
+pub fn interpret_rca_result(
+    result: &sysml_core::interactive::WizardResult,
+    method: RootCauseMethod,
+    source_id: &str,
+) -> RootCauseAnalysis {
+    let findings = match method {
+        RootCauseMethod::FiveWhy => {
+            (1..=5)
+                .filter_map(|i| {
+                    result.get_string(&format!("why_{i}"))
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string())
+                })
+                .collect()
+        }
+        RootCauseMethod::Fishbone => {
+            ["man", "machine", "method", "material", "measurement", "environment"]
+                .iter()
+                .filter_map(|&cat| {
+                    result.get_string(cat)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| format!("{}: {s}", cat))
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+
+    let root_cause = result.get_string("root_cause")
+        .unwrap_or("")
+        .to_string();
+
+    RootCauseAnalysis {
+        source_id: source_id.to_string(),
+        method,
+        findings,
+        root_cause,
+    }
+}
+
 /// Create a [`RecordEnvelope`] for a root cause analysis.
 pub fn create_rca_record(rca: &RootCauseAnalysis, author: &str) -> RecordEnvelope {
     let id = generate_record_id("quality", "rca", author);
@@ -270,5 +314,62 @@ mod tests {
         let json = serde_json::to_string(&rca).unwrap();
         assert!(json.contains("\"five_why\""));
         assert!(json.contains("\"root_cause\""));
+    }
+
+    #[test]
+    fn interpret_five_why_result() {
+        use sysml_core::interactive::{WizardResult, WizardAnswer};
+
+        let mut result = WizardResult::new();
+        result.set("why_1", WizardAnswer::String("Rotor OD out of spec".into()));
+        result.set("why_2", WizardAnswer::String("Tool offset drifted".into()));
+        result.set("why_3", WizardAnswer::String("No mid-shift check".into()));
+        result.set("why_4", WizardAnswer::String("SOP gap".into()));
+        result.set("why_5", WizardAnswer::String("Process validation gap".into()));
+        result.set("root_cause", WizardAnswer::String("Missing periodic verification".into()));
+
+        let rca = interpret_rca_result(&result, RootCauseMethod::FiveWhy, "NCR-042");
+        assert_eq!(rca.source_id, "NCR-042");
+        assert_eq!(rca.method, RootCauseMethod::FiveWhy);
+        assert_eq!(rca.findings.len(), 5);
+        assert_eq!(rca.findings[0], "Rotor OD out of spec");
+        assert_eq!(rca.root_cause, "Missing periodic verification");
+    }
+
+    #[test]
+    fn interpret_fishbone_result() {
+        use sysml_core::interactive::{WizardResult, WizardAnswer};
+
+        let mut result = WizardResult::new();
+        result.set("man", WizardAnswer::String("Operator fatigue".into()));
+        result.set("machine", WizardAnswer::Skipped);
+        result.set("method", WizardAnswer::String("SOP outdated".into()));
+        result.set("material", WizardAnswer::Skipped);
+        result.set("measurement", WizardAnswer::String("Gage R&R failing".into()));
+        result.set("environment", WizardAnswer::Skipped);
+        result.set("root_cause", WizardAnswer::String("SOP and measurement gaps".into()));
+
+        let rca = interpret_rca_result(&result, RootCauseMethod::Fishbone, "CAPA-007");
+        assert_eq!(rca.source_id, "CAPA-007");
+        assert_eq!(rca.method, RootCauseMethod::Fishbone);
+        assert_eq!(rca.findings.len(), 3);
+        assert!(rca.findings[0].starts_with("man:"));
+        assert!(rca.findings[1].starts_with("method:"));
+        assert!(rca.findings[2].starts_with("measurement:"));
+        assert_eq!(rca.root_cause, "SOP and measurement gaps");
+    }
+
+    #[test]
+    fn interpret_five_why_with_empty_whys() {
+        use sysml_core::interactive::{WizardResult, WizardAnswer};
+
+        let mut result = WizardResult::new();
+        result.set("why_1", WizardAnswer::String("First cause".into()));
+        result.set("why_2", WizardAnswer::String("".into()));
+        result.set("why_3", WizardAnswer::String("Third cause".into()));
+        result.set("root_cause", WizardAnswer::String("Root".into()));
+
+        let rca = interpret_rca_result(&result, RootCauseMethod::FiveWhy, "NCR-001");
+        assert_eq!(rca.findings.len(), 2); // empty and missing whys filtered
     }
 }

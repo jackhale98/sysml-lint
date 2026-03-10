@@ -1132,6 +1132,23 @@ pub(crate) enum QualityCommand {
         #[arg(long)]
         inside: Option<String>,
     },
+    /// Perform root cause analysis (5 Why or Fishbone) on an NCR or CAPA.
+    ///
+    /// Guided interactive analysis that produces a structured record.
+    Rca {
+        /// Source item ID (NCR or CAPA ID) to analyze.
+        #[arg(long)]
+        source: Option<String>,
+        /// RCA method: five-why or fishbone.
+        #[arg(long, value_parser = ["five-why", "fishbone"])]
+        method: Option<String>,
+    },
+    /// Add a corrective/preventive action to an existing CAPA.
+    Action {
+        /// CAPA ID to add the action to.
+        #[arg(long)]
+        capa: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

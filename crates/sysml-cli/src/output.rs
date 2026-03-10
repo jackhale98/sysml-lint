@@ -10,6 +10,9 @@ pub fn format_text(diagnostics: &[Diagnostic]) -> String {
             "{}:{}:{}: {}[{}]: {}",
             d.file, d.span.start_row, d.span.start_col, d.severity, d.code, d.message,
         ));
+        if let Some(ref suggestion) = d.suggestion {
+            lines.push(format!("  help: {}", suggestion));
+        }
     }
     lines.join("\n")
 }

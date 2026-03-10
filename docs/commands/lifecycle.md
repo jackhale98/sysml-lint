@@ -357,3 +357,31 @@ sysml quality create --type deviation
 | Option | Description |
 |--------|-------------|
 | `--type <TYPE>` | Quality item type: `ncr`, `capa`, `deviation` |
+
+### quality rca
+
+Perform root cause analysis on an NCR or CAPA using a structured interactive methodology. Supports 5 Why (5 successive "why" questions) and Fishbone/Ishikawa (6 cause categories). Writes a TOML record to `.sysml/records/`.
+
+```sh
+sysml quality rca                                          # prompted for all inputs
+sysml quality rca --source NCR-001 --method five-why       # skip prompts
+sysml quality rca --source CAPA-003 --method fishbone
+```
+
+| Option | Description |
+|--------|-------------|
+| `--source <ID>` | Source item ID (NCR or CAPA) to analyze |
+| `--method <METHOD>` | RCA method: `five-why`, `fishbone` |
+
+### quality action
+
+Add a corrective or preventive action to an existing CAPA using an interactive wizard. Records the action type, description, owner, due date, and optional verification reference.
+
+```sh
+sysml quality action                           # prompted for CAPA ID
+sysml quality action --capa CAPA-001           # skip CAPA ID prompt
+```
+
+| Option | Description |
+|--------|-------------|
+| `--capa <ID>` | CAPA ID to add the action to |

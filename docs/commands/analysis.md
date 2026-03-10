@@ -20,6 +20,12 @@ sysml lint --disable unused,unresolved model.sysml
 | `-d, --disable <CHECKS>` | Disable checks (comma-separated). See [Validation](../validation.md). |
 | `-s, --severity <LEVEL>` | Minimum severity: `note`, `warning`, `error` (default: `note`) |
 
+When unresolved type references or connection targets have a close match among known definitions, `lint` suggests the closest match:
+```
+model.sysml:5:1: warning[W004]: type `Vehicel` is not defined in this file
+  help: did you mean `Vehicle`?
+```
+
 Exit codes: `0` = no errors, `1` = errors found.
 
 ## list

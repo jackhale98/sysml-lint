@@ -12,6 +12,12 @@ pub fn run(cli: &crate::Cli, kind: &QualityCommand) -> ExitCode {
         QualityCommand::Create { r#type, file, inside } => {
             run_create(r#type.as_deref(), file.as_ref(), inside.as_deref())
         }
+        QualityCommand::Rca { source, method } => {
+            run_rca(source.as_deref(), method.as_deref())
+        }
+        QualityCommand::Action { capa } => {
+            run_action(capa.as_deref())
+        }
     }
 }
 
@@ -381,6 +387,172 @@ fn create_deviation_from_wizard(result: &sysml_core::interactive::WizardResult) 
     match crate::records::write_record(&record, &records_dir) {
         Ok(path) => {
             eprintln!("  Record:    {}", path.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error writing record: {}", e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_rca(source: Option<&str>, method_arg: Option<&str>) -> ExitCode {
+    use sysml_core::interactive::*;
+    use crate::wizard::CliWizardRunner;
+
+    let runner = CliWizardRunner::new();
+    if !runner.is_interactive() {
+        eprintln!("error: `quality rca` requires an interactive terminal");
+        return ExitCode::FAILURE;
+    }
+
+    // Get source item ID
+    let source_id = if let Some(s) = source {
+        s.to_string()
+    } else {
+        let step = WizardStep::string("source_id", "Source item ID (NCR or CAPA)")
+            .with_explanation("Enter the ID of the NCR or CAPA to perform root cause analysis on.");
+        match runner.run_step(&step) {
+            Some(WizardAnswer::String(s)) => s,
+            _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+        }
+    };
+
+    // Choose RCA method
+    let method = if let Some(m) = method_arg {
+        m.to_string()
+    } else {
+        let step = WizardStep::choice("method", "Root cause analysis method", vec![
+            ("five-why", "5 Why — drill down through 5 successive \"why\" questions"),
+            ("fishbone", "Fishbone (Ishikawa) — analyze 6 cause categories"),
+        ]);
+        match runner.run_step(&step) {
+            Some(WizardAnswer::String(s)) => s,
+            _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+        }
+    };
+
+    let rca_method = match method.as_str() {
+        "five-why" => sysml_capa::enums::RootCauseMethod::FiveWhy,
+        "fishbone" => sysml_capa::enums::RootCauseMethod::Fishbone,
+        _ => {
+            eprintln!("error: unknown method `{method}`. Use five-why or fishbone.");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let steps = match rca_method {
+        sysml_capa::enums::RootCauseMethod::FiveWhy => sysml_capa::build_five_why_steps(),
+        sysml_capa::enums::RootCauseMethod::Fishbone => sysml_capa::build_fishbone_steps(),
+        _ => unreachable!(),
+    };
+
+    eprintln!("\nRoot Cause Analysis — {} for {source_id}", rca_method.label());
+    eprintln!();
+
+    let result = match run_wizard(&runner, &steps) {
+        Some(r) => r,
+        None => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+    };
+
+    let rca = sysml_capa::interpret_rca_result(&result, rca_method, &source_id);
+    let record = sysml_capa::create_rca_record(&rca, "engineer");
+
+    eprintln!("\nRoot Cause Analysis Complete:");
+    eprintln!("  Source:     {}", rca.source_id);
+    eprintln!("  Method:     {}", rca.method.label());
+    eprintln!("  Findings:   {} steps", rca.findings.len());
+    eprintln!("  Root Cause: {}", rca.root_cause);
+
+    let records_dir = crate::records::resolve_records_dir();
+    match crate::records::write_record(&record, &records_dir) {
+        Ok(path) => {
+            eprintln!("  Record:     {}", path.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error writing record: {}", e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_action(capa_id: Option<&str>) -> ExitCode {
+    use sysml_core::interactive::*;
+    use sysml_core::record::generate_record_id;
+    use crate::wizard::CliWizardRunner;
+
+    let runner = CliWizardRunner::new();
+    if !runner.is_interactive() {
+        eprintln!("error: `quality action` requires an interactive terminal");
+        return ExitCode::FAILURE;
+    }
+
+    // Get CAPA ID
+    let capa_id_str = if let Some(id) = capa_id {
+        id.to_string()
+    } else {
+        let step = WizardStep::string("capa_id", "CAPA ID to add action to")
+            .with_explanation("Enter the CAPA identifier (e.g. quality-capa-...).");
+        match runner.run_step(&step) {
+            Some(WizardAnswer::String(s)) => s,
+            _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+        }
+    };
+
+    let steps = sysml_capa::build_action_wizard_steps();
+
+    eprintln!("\nAdd Action to CAPA: {capa_id_str}");
+    eprintln!();
+
+    let result = match run_wizard(&runner, &steps) {
+        Some(r) => r,
+        None => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+    };
+
+    let action_id = generate_record_id("quality", "action", "engineer");
+    let action = sysml_capa::interpret_action_result(&result, &action_id);
+
+    // Create a record for the action
+    let mut refs = std::collections::BTreeMap::new();
+    refs.insert("capa".to_string(), vec![capa_id_str.clone()]);
+    refs.insert("action".to_string(), vec![action.id.clone()]);
+
+    let mut data = std::collections::BTreeMap::new();
+    use sysml_core::record::RecordValue;
+    data.insert("action_type".into(), RecordValue::String(action.action_type.label().to_string()));
+    data.insert("description".into(), RecordValue::String(action.description.clone()));
+    data.insert("owner".into(), RecordValue::String(action.owner.clone()));
+    data.insert("due_date".into(), RecordValue::String(action.due_date.clone()));
+    data.insert("completed".into(), RecordValue::String("false".into()));
+    if let Some(ref vr) = action.verification_ref {
+        data.insert("verification_ref".into(), RecordValue::String(vr.clone()));
+    }
+
+    let record = sysml_core::record::RecordEnvelope {
+        meta: sysml_core::record::RecordMeta {
+            id: sysml_core::record::generate_record_id("quality", "action", "engineer"),
+            tool: "quality".into(),
+            record_type: "action".into(),
+            created: sysml_core::record::now_iso8601(),
+            author: "engineer".into(),
+        },
+        refs,
+        data,
+    };
+
+    eprintln!("\nAction Added:");
+    eprintln!("  CAPA:         {capa_id_str}");
+    eprintln!("  Action ID:    {}", action.id);
+    eprintln!("  Type:         {}", action.action_type.label());
+    eprintln!("  Description:  {}", action.description);
+    eprintln!("  Owner:        {}", action.owner);
+    eprintln!("  Due:          {}", action.due_date);
+
+    let records_dir = crate::records::resolve_records_dir();
+    match crate::records::write_record(&record, &records_dir) {
+        Ok(path) => {
+            eprintln!("  Record:       {}", path.display());
             ExitCode::SUCCESS
         }
         Err(e) => {
