@@ -53,9 +53,14 @@ Show detailed information about a specific element.
 ```sh
 sysml show model.sysml Vehicle
 sysml show -f json model.sysml Engine
+sysml show --raw model.sysml Vehicle          # Print raw SysML source text
 ```
 
 Displays: kind, visibility, parent, documentation, type, children, relationships.
+
+| Option | Description |
+|--------|-------------|
+| `--raw` | Print the original SysML source text of the element to stdout |
 
 ## check
 

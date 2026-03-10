@@ -46,7 +46,9 @@ fn render_mermaid(graph: &DiagramGraph) -> String {
     match graph.kind {
         DiagramKind::Stm => render_mermaid_stm(&mut out, graph),
         DiagramKind::Act => render_mermaid_activity(&mut out, graph),
-        DiagramKind::Req => render_mermaid_flowchart(&mut out, graph),
+        DiagramKind::Req | DiagramKind::Trace | DiagramKind::Alloc | DiagramKind::Ucd => {
+            render_mermaid_flowchart(&mut out, graph)
+        }
         _ => render_mermaid_class_diagram(&mut out, graph),
     }
 
@@ -107,7 +109,14 @@ fn render_mermaid_class_diagram(out: &mut String, graph: &DiagramGraph) {
 fn render_mermaid_class_node(out: &mut String, node: &DiagramNode, indent: &str) {
     let id = mermaid_id(&node.id);
     out.push_str(&format!("{}class {} {{\n", indent, id));
-    if let Some(ref st) = node.stereotype {
+    // Add stereotype annotation based on NodeKind
+    let stereotype = node.stereotype.as_deref().or(match node.kind {
+        NodeKind::Port => Some("<<port>>"),
+        NodeKind::Constraint => Some("<<constraint>>"),
+        NodeKind::Requirement => Some("<<requirement>>"),
+        _ => None,
+    });
+    if let Some(st) = stereotype {
         out.push_str(&format!("{}    {}\n", indent, st));
     }
     for (key, val) in &node.attributes {
@@ -192,16 +201,29 @@ fn render_mermaid_flowchart(out: &mut String, graph: &DiagramGraph) {
     out.push_str(&format!("flowchart {}\n", graph.direction.mermaid_code()));
     for node in &graph.nodes {
         let id = mermaid_id(&node.id);
+        let stereo = node
+            .stereotype
+            .as_ref()
+            .map(|s| format!("\\n{}", s))
+            .unwrap_or_default();
+        let attrs_str = node
+            .attributes
+            .iter()
+            .map(|(k, v)| format!("\\n{}: {}", k, v))
+            .collect::<String>();
+        let full_label = format!("{}{}{}", node.label, stereo, attrs_str);
         let shape = match node.kind {
-            NodeKind::Requirement => format!("{}[\"{}\"]\n", id, node.label),
-            NodeKind::Block => format!("{}([\"{}\"])\n", id, node.label),
-            _ => format!("{}[\"{}\"]\n", id, node.label),
+            NodeKind::Requirement => format!("{}[\"{}\"]\n", id, full_label),
+            NodeKind::Block => format!("{}([\"{}\"])\n", id, full_label),
+            NodeKind::UseCase => format!("{}([\"{}\"]) \n", id, full_label),
+            NodeKind::Actor => format!("{}@{{ shape: person, label: \"{}\" }}@\n", id, node.label),
+            _ => format!("{}[\"{}\"]\n", id, full_label),
         };
         out.push_str(&format!("    {}", shape));
     }
     for edge in &graph.edges {
         let style = match edge.kind {
-            EdgeKind::Satisfy | EdgeKind::Verify => "-.->",
+            EdgeKind::Satisfy | EdgeKind::Verify | EdgeKind::Allocate => "-.->",
             _ => "-->",
         };
         let label = edge
@@ -228,7 +250,8 @@ fn render_plantuml(graph: &DiagramGraph) -> String {
     match graph.kind {
         DiagramKind::Stm => render_plantuml_stm(&mut out, graph),
         DiagramKind::Act => render_plantuml_activity(&mut out, graph),
-        DiagramKind::Req => render_plantuml_req(&mut out, graph),
+        DiagramKind::Req | DiagramKind::Trace => render_plantuml_req(&mut out, graph),
+        DiagramKind::Ucd => render_plantuml_ucd(&mut out, graph),
         _ => render_plantuml_class(&mut out, graph),
     }
 
@@ -435,6 +458,39 @@ fn render_plantuml_req(out: &mut String, graph: &DiagramGraph) {
     }
 }
 
+fn render_plantuml_ucd(out: &mut String, graph: &DiagramGraph) {
+    for node in &graph.nodes {
+        match node.kind {
+            NodeKind::Actor => {
+                out.push_str(&format!("actor \"{}\" as {}\n", node.label, node.id));
+            }
+            NodeKind::UseCase => {
+                out.push_str(&format!("usecase \"{}\" as {}\n", node.label, node.id));
+            }
+            _ => {
+                let stereo = node
+                    .stereotype
+                    .as_ref()
+                    .map(|s| format!(" {}", s))
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "rectangle \"{}\" as {}{}\n",
+                    node.label, node.id, stereo
+                ));
+            }
+        }
+    }
+    out.push('\n');
+    for edge in &graph.edges {
+        let label = edge
+            .label
+            .as_ref()
+            .map(|l| format!(" : {}", l))
+            .unwrap_or_default();
+        out.push_str(&format!("{} --> {}{}\n", edge.source, edge.target, label));
+    }
+}
+
 // ========================================================================
 // DOT (Graphviz)
 // ========================================================================
@@ -499,6 +555,8 @@ fn render_dot(graph: &DiagramGraph) -> String {
             NodeKind::Decision => ("diamond", ", width=0.5, fixedsize=true"),
             NodeKind::Fork | NodeKind::Join => ("rectangle", ", width=1.5, height=0.05, fixedsize=true, style=filled, fillcolor=black, label=\"\""),
             NodeKind::Note => ("note", ""),
+            NodeKind::UseCase => ("ellipse", ""),
+            NodeKind::Actor => ("box", ", style=\"rounded\""),
         };
 
         let label = if extra.contains("label=\"\"") {
@@ -537,7 +595,7 @@ fn render_dot(graph: &DiagramGraph) -> String {
         let style = match edge.kind {
             EdgeKind::Specialization => "style=solid, arrowhead=empty",
             EdgeKind::Composition => "style=solid, arrowhead=diamond",
-            EdgeKind::Satisfy | EdgeKind::Verify | EdgeKind::Dependency => {
+            EdgeKind::Satisfy | EdgeKind::Verify | EdgeKind::Dependency | EdgeKind::Allocate => {
                 "style=dashed, arrowhead=open"
             }
             _ => "style=solid",
@@ -611,7 +669,7 @@ fn render_d2(graph: &DiagramGraph) -> String {
             .map(|l| format!(": {}", l))
             .unwrap_or_default();
         let style = match edge.kind {
-            EdgeKind::Satisfy | EdgeKind::Verify | EdgeKind::Dependency => " {\n    style.stroke-dash: 3\n  }",
+            EdgeKind::Satisfy | EdgeKind::Verify | EdgeKind::Dependency | EdgeKind::Allocate => " {\n    style.stroke-dash: 3\n  }",
             _ => "",
         };
         out.push_str(&format!("{} {} {} {}{}\n", src, arrow, tgt, label, style));
@@ -633,6 +691,8 @@ fn render_d2_node(out: &mut String, node: &DiagramNode, indent: &str) {
         NodeKind::Package => "package",
         NodeKind::Decision => "diamond",
         NodeKind::Fork | NodeKind::Join => "rectangle",
+        NodeKind::UseCase => "oval",
+        NodeKind::Actor => "person",
     };
 
     if node.attributes.is_empty() && node.stereotype.is_none() {

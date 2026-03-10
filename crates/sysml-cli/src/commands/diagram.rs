@@ -11,6 +11,7 @@ pub(crate) fn run(
     diagram_type: &str,
     output_format: &str,
     scope: Option<&str>,
+    view: Option<&str>,
     direction: Option<&str>,
     depth: Option<usize>,
 ) -> ExitCode {
@@ -20,7 +21,7 @@ pub(crate) fn run(
         Some(k) => k,
         None => {
             eprintln!(
-                "error: unknown diagram type `{}`. Available: bdd, ibd, stm, act, req, pkg, par",
+                "error: unknown diagram type `{}`. Available: bdd, ibd, stm, act, req, pkg, par, trace, alloc, ucd",
                 diagram_type
             );
             return ExitCode::from(1);
@@ -106,10 +107,18 @@ pub(crate) fn run(
         DiagramKind::Req => build_req(&model),
         DiagramKind::Pkg => build_pkg(&model),
         DiagramKind::Par => build_par(&model, scope),
+        DiagramKind::Trace => build_trace(&model),
+        DiagramKind::Alloc => build_alloc(&model),
+        DiagramKind::Ucd => build_ucd(&model),
     };
 
     graph.direction = layout_dir;
     graph.max_depth = depth;
+
+    // Apply view filter if specified
+    if let Some(view_name) = view {
+        apply_view_filter(&mut graph, &model, view_name);
+    }
 
     let output = render(&graph, format);
     println!("{}", output);

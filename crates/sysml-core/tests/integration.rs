@@ -459,3 +459,98 @@ fn parse_enum_members() {
         color.enum_members.len(),
         color.enum_members.iter().map(|m| &m.name).collect::<Vec<_>>());
 }
+
+// --- Connection extraction ---
+
+#[test]
+fn parse_connection_single_line() {
+    let model = parse("package T {
+    part a : A;
+    part b : B;
+    connection c connect a to b;
+}");
+    assert_eq!(model.connections.len(), 1, "Should find 1 connection");
+    assert_eq!(model.connections[0].name.as_deref(), Some("c"));
+    assert_eq!(model.connections[0].source, "a");
+    assert_eq!(model.connections[0].target, "b");
+}
+
+#[test]
+fn parse_connection_multiline_with_type() {
+    // connection on one line, connect clause on next (like simple-vehicle.sysml)
+    let model = parse("package T {
+    part engine : Engine;
+    part transmission : Transmission;
+    connection engineToTrans : EngineConnection
+        connect engine to transmission;
+}");
+    assert_eq!(model.connections.len(), 1,
+        "Multi-line connection should be extracted; got: {:?}", model.connections);
+    assert_eq!(model.connections[0].source, "engine");
+    assert_eq!(model.connections[0].target, "transmission");
+}
+
+#[test]
+fn parse_interface_with_connect() {
+    // interface with connect clause (like VehicleUsages.sysml)
+    let model = parse("package T {
+    part a : A;
+    part b : B;
+    interface myIface : IfaceDef connect
+        a.portX to b.portY;
+}");
+    assert_eq!(model.connections.len(), 1,
+        "Interface connect should be extracted; got: {:?}", model.connections);
+    assert_eq!(model.connections[0].source, "a.portX");
+    assert_eq!(model.connections[0].target, "b.portY");
+}
+
+#[test]
+fn parse_interface_connect_with_body() {
+    // interface with connect clause AND body (like vehicle_C3 driveShaft)
+    // The ::> bindings mean the actual references are transmission.drive and rearAxle.drive,
+    // not the local endpoint names transDrive and axleDrive.
+    let model = parse("package T {
+    interface driveShaft connect
+        transDrive ::> transmission.drive to axleDrive ::> rearAxle.drive {
+        flow transDrive.driveTorque to axleDrive.driveTorque;
+    }
+}");
+    assert_eq!(model.connections.len(), 1,
+        "Interface with connect+body should extract connection; got: {:?}", model.connections);
+    assert_eq!(model.connections[0].source, "transmission.drive");
+    assert_eq!(model.connections[0].target, "rearAxle.drive");
+}
+
+#[test]
+fn parse_connection_dotted_endpoints() {
+    let model = parse("package T {
+    connection c connect engine.drivePwrPort to transmission.clutchPort;
+}");
+    assert_eq!(model.connections.len(), 1);
+    assert_eq!(model.connections[0].source, "engine.drivePwrPort");
+    assert_eq!(model.connections[0].target, "transmission.clutchPort");
+}
+
+#[test]
+fn parse_simple_vehicle_connection() {
+    let source = std::fs::read_to_string("../../test/fixtures/simple-vehicle.sysml").unwrap();
+    let model = sysml_parser::parse_file("simple-vehicle.sysml", &source);
+    println!("Connections: {:?}", model.connections);
+    assert!(!model.connections.is_empty(), "simple-vehicle should have connections");
+    let conn = model.connections.iter().find(|c| c.name.as_deref() == Some("engineToTrans"));
+    assert!(conn.is_some(), "Should find engineToTrans connection");
+}
+
+#[test]
+fn parse_vehicle_usages_connections() {
+    let source = std::fs::read_to_string("../../test/fixtures/VehicleUsages.sysml").unwrap();
+    let model = sysml_parser::parse_file("VehicleUsages.sysml", &source);
+    let driveshaft = model.connections.iter().find(|c| c.name.as_deref() == Some("driveShaft"));
+    assert!(driveshaft.is_some(), "Should find driveShaft interface connection; all connections: {:?}",
+        model.connections.iter().map(|c| &c.name).collect::<Vec<_>>());
+    let ds = driveshaft.unwrap();
+    // With ::> binding resolution, source/target should be the actual part references
+    assert_eq!(ds.source, "transmission.drive");
+    assert_eq!(ds.target, "rearAxleAssembly.rearAxle.drive");
+}

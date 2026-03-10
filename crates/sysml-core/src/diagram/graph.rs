@@ -17,6 +17,12 @@ pub enum DiagramKind {
     Pkg,
     /// Parametric Diagram — constraints and parameters.
     Par,
+    /// Traceability Diagram — V-model: requirements → design → verification.
+    Trace,
+    /// Allocation Diagram — logical-to-physical mapping (actions/use-cases → parts).
+    Alloc,
+    /// Use Case Diagram — use case definitions and actors.
+    Ucd,
 }
 
 impl DiagramKind {
@@ -29,6 +35,9 @@ impl DiagramKind {
             Self::Req => "Requirements Diagram",
             Self::Pkg => "Package Diagram",
             Self::Par => "Parametric Diagram",
+            Self::Trace => "Traceability Diagram",
+            Self::Alloc => "Allocation Diagram",
+            Self::Ucd => "Use Case Diagram",
         }
     }
 
@@ -41,6 +50,9 @@ impl DiagramKind {
             "req" | "requirements" => Some(Self::Req),
             "pkg" | "package" => Some(Self::Pkg),
             "par" | "parametric" => Some(Self::Par),
+            "trace" | "traceability" => Some(Self::Trace),
+            "alloc" | "allocation" => Some(Self::Alloc),
+            "ucd" | "usecase" | "use-case" => Some(Self::Ucd),
             _ => None,
         }
     }
@@ -126,6 +138,8 @@ pub enum NodeKind {
     InitialState,
     FinalState,
     Note,
+    UseCase,
+    Actor,
 }
 
 /// An edge in the diagram graph.
@@ -200,5 +214,29 @@ impl DiagramGraph {
 
     pub fn has_node(&self, id: &str) -> bool {
         self.nodes.iter().any(|n| n.id == id)
+    }
+
+    /// Remove nodes and edges that don't match the allowed set of names.
+    /// Pseudo-nodes (initial/final states) and structural nodes (forks/joins/decisions)
+    /// are always kept. Edges are kept only if both endpoints remain.
+    pub fn filter_by_names(&mut self, allowed: &std::collections::HashSet<&str>) {
+        self.nodes.retain(|n| {
+            matches!(
+                n.kind,
+                NodeKind::InitialState
+                    | NodeKind::FinalState
+                    | NodeKind::Fork
+                    | NodeKind::Join
+                    | NodeKind::Decision
+            ) || allowed.contains(n.id.as_str())
+        });
+        let remaining: std::collections::HashSet<&str> =
+            self.nodes.iter().map(|n| n.id.as_str()).collect();
+        self.edges
+            .retain(|e| remaining.contains(e.source.as_str()) || remaining.contains(e.target.as_str()));
+        self.subgraphs.iter_mut().for_each(|sg| {
+            sg.node_ids.retain(|id| remaining.contains(id.as_str()));
+        });
+        self.subgraphs.retain(|sg| !sg.node_ids.is_empty());
     }
 }

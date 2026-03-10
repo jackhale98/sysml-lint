@@ -118,6 +118,72 @@ fn show_missing_element() {
         .stderr(predicate::str::contains("not found"));
 }
 
+// show --raw
+
+#[test]
+fn show_raw_prints_source() {
+    cmd()
+        .args(["show", "--raw", &fixture("simple-vehicle.sysml"), "Vehicle"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("part def Vehicle"))
+        .stdout(predicate::str::contains("{"));
+}
+
+#[test]
+fn show_raw_usage() {
+    cmd()
+        .args(["show", "--raw", &fixture("simple-vehicle.sysml"), "engine"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("engine"));
+}
+
+#[test]
+fn show_raw_missing_element() {
+    cmd()
+        .args(["show", "--raw", &fixture("simple-vehicle.sysml"), "NotThere"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
+
+// ========================================================================
+// verify run (non-interactive — should fail without TTY)
+// ========================================================================
+
+#[test]
+fn verify_run_no_tty() {
+    // verify run requires an interactive terminal; should fail gracefully in CI
+    cmd()
+        .args(["verify", "run", &fixture("simple-vehicle.sysml")])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("interactive terminal"));
+}
+
+// ========================================================================
+// mfg start-lot (non-interactive — should fail without TTY)
+// ========================================================================
+
+#[test]
+fn mfg_start_lot_no_tty() {
+    cmd()
+        .args(["mfg", "start-lot", &fixture("simple-vehicle.sysml")])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("interactive terminal"));
+}
+
+#[test]
+fn mfg_step_missing_lot() {
+    cmd()
+        .args(["mfg", "step", "NONEXISTENT-LOT-ID"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
+
 // ========================================================================
 // diagram
 // ========================================================================

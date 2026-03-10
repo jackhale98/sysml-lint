@@ -644,6 +644,98 @@ pub fn format_spc_text(spc: &SpcData) -> String {
     out
 }
 
+/// Reconstruct a `Lot` from a persisted record envelope.
+///
+/// Rebuilds the lot structure from the TOML record data, including step
+/// names, statuses, and current progress. Parameters are not preserved
+/// in records, so reconstructed steps will have empty parameter lists.
+pub fn reconstruct_lot(record: &RecordEnvelope) -> Option<Lot> {
+    if record.meta.record_type != "lot" {
+        return None;
+    }
+
+    let lot_id = match record.data.get("lot_id") {
+        Some(RecordValue::String(s)) => s.clone(),
+        _ => return None,
+    };
+    let routing_name = record.refs.get("routing")
+        .and_then(|v| v.first())
+        .cloned()
+        .unwrap_or_default();
+    let quantity = match record.data.get("quantity") {
+        Some(RecordValue::Integer(n)) => *n as u32,
+        _ => 0,
+    };
+    let lot_type_str = match record.data.get("lot_type") {
+        Some(RecordValue::String(s)) => s.as_str(),
+        _ => "Production",
+    };
+    let lot_type = match lot_type_str {
+        "Prototype" => LotType::Prototype,
+        "FirstArticle" => LotType::FirstArticle,
+        _ => LotType::Production,
+    };
+    let status_str = match record.data.get("status") {
+        Some(RecordValue::String(s)) => s.as_str(),
+        _ => "Created",
+    };
+    let status = match status_str {
+        "InProgress" => LotStatus::InProgress,
+        "OnHold" => LotStatus::OnHold,
+        "Completed" => LotStatus::Completed,
+        "Scrapped" => LotStatus::Scrapped,
+        _ => LotStatus::Created,
+    };
+    let current_step = match record.data.get("current_step") {
+        Some(RecordValue::Integer(n)) => *n as usize,
+        _ => 0,
+    };
+
+    // Rebuild steps from refs and step_statuses
+    let step_names = record.refs.get("steps")
+        .cloned()
+        .unwrap_or_default();
+    let step_statuses = match record.data.get("step_statuses") {
+        Some(RecordValue::Table(t)) => t.clone(),
+        _ => BTreeMap::new(),
+    };
+
+    let steps: Vec<ProcessStep> = step_names.iter().enumerate().map(|(i, name)| {
+        let step_key = format!("step_{}", i + 1);
+        let step_status_str = match step_statuses.get(&step_key) {
+            Some(RecordValue::String(s)) => s.as_str(),
+            _ => "Pending",
+        };
+        let step_status = match step_status_str {
+            "Passed" => StepStatus::Passed,
+            "Failed" => StepStatus::Failed,
+            "InProgress" => StepStatus::InProgress,
+            "Deviated" => StepStatus::Deviated,
+            "Skipped" => StepStatus::Skipped,
+            _ => StepStatus::Pending,
+        };
+        ProcessStep {
+            number: i + 1,
+            name: name.clone(),
+            process_type: ProcessType::infer_from_name(name),
+            description: String::new(),
+            parameters: Vec::new(),
+            inspection_required: false,
+            status: step_status,
+        }
+    }).collect();
+
+    Some(Lot {
+        id: lot_id,
+        routing_name,
+        quantity,
+        lot_type,
+        status,
+        steps,
+        current_step,
+    })
+}
+
 /// Return a text summary of a lot's current status.
 pub fn lot_summary(lot: &Lot) -> String {
     let mut out = String::new();
@@ -687,6 +779,95 @@ pub fn lot_summary(lot: &Lot) -> String {
     }
 
     out
+}
+
+// ---------------------------------------------------------------------------
+// Interactive wizard for step execution
+// ---------------------------------------------------------------------------
+
+/// Build wizard steps for interactively executing a manufacturing process step.
+///
+/// Each parameter in the step gets a numeric input prompt. The wizard also
+/// asks for a pass/fail assessment at the end.
+pub fn build_step_wizard(step: &ProcessStep) -> Vec<sysml_core::interactive::WizardStep> {
+    use sysml_core::interactive::WizardStep;
+
+    let mut steps = Vec::new();
+
+    let desc = if step.description.is_empty() {
+        "Execute this manufacturing step and record parameter readings."
+    } else {
+        step.description.as_str()
+    };
+    steps.push(
+        WizardStep::confirm(
+            "ready",
+            &format!(
+                "Step {}: {} [{}] — Ready to begin?",
+                step.number, step.name, step.process_type
+            ),
+        )
+        .with_explanation(desc),
+    );
+
+    for param in &step.parameters {
+        let bounds = format!(
+            "Nominal: {:.4}, Control: [{:.4}, {:.4}], Spec: [{:.4}, {:.4}]",
+            param.nominal, param.lcl, param.ucl, param.lsl, param.usl
+        );
+        let unit_label = if param.unit.is_empty() { "units" } else { &param.unit };
+        steps.push(
+            WizardStep::number(
+                &format!("param_{}", param.name),
+                &format!("Enter reading for '{}' ({}):", param.name, unit_label),
+            )
+            .with_explanation(&bounds),
+        );
+    }
+
+    if step.inspection_required {
+        steps.push(
+            WizardStep::confirm("inspection_pass", "Inspection passed?")
+                .with_explanation("Confirm that the in-process inspection for this step passed."),
+        );
+    }
+
+    steps.push(
+        WizardStep::string("notes", "Any notes for this step?")
+            .optional()
+            .with_default(""),
+    );
+
+    steps
+}
+
+/// Interpret wizard results from `build_step_wizard()` into parameter readings.
+///
+/// For each parameter in the step, extracts the reading value and evaluates
+/// whether it is within control limits and specification limits.
+pub fn interpret_step_result(
+    result: &sysml_core::interactive::WizardResult,
+    step: &ProcessStep,
+) -> Vec<ParameterReading> {
+    let mut readings = Vec::new();
+
+    for param in &step.parameters {
+        let value = result.get_number(&format!("param_{}", param.name))
+            .unwrap_or(param.nominal);
+
+        let within_control = value >= param.lcl && value <= param.ucl;
+        let within_spec = value >= param.lsl && value <= param.usl;
+
+        readings.push(ParameterReading {
+            parameter_name: param.name.clone(),
+            value,
+            within_control,
+            within_spec,
+            timestamp: sysml_core::record::now_iso8601(),
+        });
+    }
+
+    readings
 }
 
 // ---------------------------------------------------------------------------
@@ -1247,5 +1428,156 @@ mod tests {
         let summary = lot_summary(&lot);
         assert!(summary.contains("Completed"));
         assert!(summary.contains("3/3 steps"));
+    }
+
+    // -----------------------------------------------------------------------
+    // build_step_wizard / interpret_step_result tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn reconstruct_lot_round_trips() {
+        let steps = sample_steps();
+        let mut lot = create_lot("WidgetRouting", steps, 50, LotType::Production);
+        advance_step(&mut lot, vec![]).unwrap();
+        let record = create_lot_record(&lot, "operator");
+        let reconstructed = reconstruct_lot(&record).unwrap();
+        assert_eq!(reconstructed.routing_name, "WidgetRouting");
+        assert_eq!(reconstructed.quantity, 50);
+        assert_eq!(reconstructed.current_step, 1);
+        assert_eq!(reconstructed.steps.len(), 3);
+        assert_eq!(reconstructed.steps[0].status, StepStatus::Passed);
+        assert_eq!(reconstructed.steps[1].status, StepStatus::Pending);
+    }
+
+    #[test]
+    fn reconstruct_lot_rejects_non_lot_record() {
+        let record = RecordEnvelope {
+            meta: RecordMeta {
+                id: "test".into(),
+                tool: "verify".into(),
+                record_type: "execution".into(),
+                created: "2025-01-01".into(),
+                author: "x".into(),
+            },
+            refs: BTreeMap::new(),
+            data: BTreeMap::new(),
+        };
+        assert!(reconstruct_lot(&record).is_none());
+    }
+
+    fn make_test_step(params: Vec<ProcessParameter>, inspection: bool) -> ProcessStep {
+        ProcessStep {
+            number: 1,
+            name: "Mill".into(),
+            process_type: ProcessType::Machining,
+            description: "Machine part".into(),
+            parameters: params,
+            inspection_required: inspection,
+            status: StepStatus::Pending,
+        }
+    }
+
+    fn make_length_param() -> ProcessParameter {
+        ProcessParameter {
+            name: "length".into(),
+            nominal: 100.0,
+            ucl: 100.5,
+            lcl: 99.5,
+            usl: 101.0,
+            lsl: 99.0,
+            unit: "mm".into(),
+        }
+    }
+
+    #[test]
+    fn build_step_wizard_has_ready_prompt() {
+        let step = ProcessStep {
+            number: 1,
+            name: "CutBlanks".into(),
+            process_type: ProcessType::Machining,
+            description: "Cut raw blanks".into(),
+            parameters: vec![],
+            inspection_required: false,
+            status: StepStatus::Pending,
+        };
+        let wizard_steps = build_step_wizard(&step);
+        assert!(!wizard_steps.is_empty());
+        assert_eq!(wizard_steps[0].id, "ready");
+    }
+
+    #[test]
+    fn build_step_wizard_has_parameter_prompts() {
+        let step = ProcessStep {
+            number: 1,
+            name: "Mill".into(),
+            process_type: ProcessType::Machining,
+            description: String::new(),
+            parameters: vec![
+                make_length_param(),
+                ProcessParameter {
+                    name: "width".into(),
+                    nominal: 50.0,
+                    ucl: 50.3,
+                    lcl: 49.7,
+                    usl: 50.5,
+                    lsl: 49.5,
+                    unit: "mm".into(),
+                },
+            ],
+            inspection_required: true,
+            status: StepStatus::Pending,
+        };
+        let wizard_steps = build_step_wizard(&step);
+        // ready + 2 params + inspection + notes = 5
+        assert_eq!(wizard_steps.len(), 5);
+        assert_eq!(wizard_steps[1].id, "param_length");
+        assert_eq!(wizard_steps[2].id, "param_width");
+        assert_eq!(wizard_steps[3].id, "inspection_pass");
+        assert_eq!(wizard_steps[4].id, "notes");
+    }
+
+    #[test]
+    fn interpret_step_result_within_limits() {
+        use sysml_core::interactive::*;
+        let step = make_test_step(vec![make_length_param()], false);
+        let mut result = WizardResult::new();
+        result.set("ready", WizardAnswer::Bool(true));
+        result.set("param_length", WizardAnswer::Number(100.1));
+        result.set("notes", WizardAnswer::String("".into()));
+
+        let readings = interpret_step_result(&result, &step);
+        assert_eq!(readings.len(), 1);
+        assert_eq!(readings[0].parameter_name, "length");
+        assert_eq!(readings[0].value, 100.1);
+        assert!(readings[0].within_control);
+        assert!(readings[0].within_spec);
+    }
+
+    #[test]
+    fn interpret_step_result_out_of_control() {
+        use sysml_core::interactive::*;
+        let step = make_test_step(vec![make_length_param()], false);
+        let mut result = WizardResult::new();
+        result.set("ready", WizardAnswer::Bool(true));
+        result.set("param_length", WizardAnswer::Number(100.8));
+        result.set("notes", WizardAnswer::String("".into()));
+
+        let readings = interpret_step_result(&result, &step);
+        assert!(!readings[0].within_control);
+        assert!(readings[0].within_spec);
+    }
+
+    #[test]
+    fn interpret_step_result_out_of_spec() {
+        use sysml_core::interactive::*;
+        let step = make_test_step(vec![make_length_param()], false);
+        let mut result = WizardResult::new();
+        result.set("ready", WizardAnswer::Bool(true));
+        result.set("param_length", WizardAnswer::Number(105.0));
+        result.set("notes", WizardAnswer::String("".into()));
+
+        let readings = interpret_step_result(&result, &step);
+        assert!(!readings[0].within_control);
+        assert!(!readings[0].within_spec);
     }
 }

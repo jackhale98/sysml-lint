@@ -28,6 +28,11 @@ impl Span {
             end_byte: node.end_byte(),
         }
     }
+
+    /// Returns true if `other` is fully contained within this span.
+    pub fn contains(&self, other: &Span) -> bool {
+        self.start_byte <= other.start_byte && other.end_byte <= self.end_byte
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]

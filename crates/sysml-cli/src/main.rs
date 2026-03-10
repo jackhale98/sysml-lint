@@ -30,16 +30,16 @@ fn main() -> ExitCode {
             &cli, files, kind.as_deref(), name.as_deref(), parent.as_deref(),
             *unused, *abstract_only, visibility.as_deref(), view.as_deref(),
         ),
-        Command::Show { file, element } => commands::show::run(&cli, file, element),
+        Command::Show { file, element, raw } => commands::show::run(&cli, file, element, *raw),
         Command::Trace { files, check, min_coverage } => {
             commands::trace::run(&cli, files, *check, *min_coverage)
         }
         Command::Interfaces { files, unconnected } => {
             commands::interfaces::run(&cli, files, *unconnected)
         }
-        Command::Diagram { file, diagram_type, output_format, scope, direction, depth } => {
+        Command::Diagram { file, diagram_type, output_format, scope, view, direction, depth } => {
             commands::diagram::run(&cli, file, diagram_type, output_format,
-                scope.as_deref(), direction.as_deref(), *depth)
+                scope.as_deref(), view.as_deref(), direction.as_deref(), *depth)
         }
         Command::Simulate { kind } => commands::simulate::run(&cli, kind),
         Command::Export { kind } => commands::export::run(&cli, kind),

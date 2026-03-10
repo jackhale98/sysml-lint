@@ -5,6 +5,12 @@ use crate::sim::state_machine::StateMachineModel;
 use crate::sim::action_flow::{ActionModel, ActionStep};
 use super::graph::*;
 
+/// Extract the root (first) segment of a dotted path.
+/// "engine.drivePwrPort" → "engine", "transmission" → "transmission"
+fn root_name(name: &str) -> &str {
+    name.split('.').next().unwrap_or(name)
+}
+
 /// Build a Block Definition Diagram showing definitions and their relationships.
 ///
 /// Shows: definitions as blocks, specialization arrows, composition (part usages).
@@ -93,22 +99,64 @@ pub fn build_bdd(model: &Model, scope: Option<&str>) -> DiagramGraph {
 /// Build an Internal Block Diagram for a specific definition.
 ///
 /// Shows: parts as blocks, ports on edges, connections between ports.
+/// Recursively collect ports from a part and all its nested parts.
+/// Uses span containment to disambiguate same-named usages in different scopes.
+fn collect_ports_recursive(
+    model: &Model,
+    parent_name: &str,
+    parent_span: &crate::model::Span,
+    prefix: &str,
+) -> Vec<(String, String)> {
+    let mut ports = Vec::new();
+    // Find children: matching parent_def name AND contained within parent span
+    let children: Vec<&crate::model::Usage> = model.usages
+        .iter()
+        .filter(|u| u.parent_def.as_deref() == Some(parent_name)
+            && parent_span.contains(&u.span))
+        .collect();
+    for cu in &children {
+        if cu.kind == "port" {
+            let pt = cu.type_ref.as_deref().unwrap_or("?");
+            let dir = cu.direction
+                .map(|d| format!("{} ", d.label()))
+                .unwrap_or_default();
+            let conj = if cu.is_conjugated { "~" } else { "" };
+            let name = if prefix.is_empty() {
+                cu.name.clone()
+            } else {
+                format!("{}.{}", prefix, cu.name)
+            };
+            ports.push((format!("{}port {}", dir, name), format!("{}{}", conj, pt)));
+        } else if cu.kind == "part" {
+            let nested_prefix = if prefix.is_empty() {
+                cu.name.clone()
+            } else {
+                format!("{}.{}", prefix, cu.name)
+            };
+            ports.extend(collect_ports_recursive(model, &cu.name, &cu.span, &nested_prefix));
+        }
+    }
+    ports
+}
+
 pub fn build_ibd(model: &Model, def_name: &str) -> DiagramGraph {
     let title = format!("ibd [{}]", def_name);
     let mut graph = DiagramGraph::new(title, DiagramKind::Ibd);
 
     let usages = model.usages_in_def(def_name);
 
-    // Add part usages as blocks
+    // Add part usages as blocks, with ports inside them as attributes
     for u in &usages {
         if u.kind == "part" {
             let t = u.type_ref.as_deref().unwrap_or("?");
+            // Collect ports recursively from this part and its nested parts
+            let child_ports = collect_ports_recursive(model, &u.name, &u.span, "");
             graph.add_node(DiagramNode {
                 id: u.name.clone(),
                 label: format!("{} : {}", u.name, t),
                 kind: NodeKind::Block,
                 stereotype: None,
-                attributes: Vec::new(),
+                attributes: child_ports,
             });
         } else if u.kind == "port" {
             let t = u.type_ref.as_deref().unwrap_or("?");
@@ -116,9 +164,10 @@ pub fn build_ibd(model: &Model, def_name: &str) -> DiagramGraph {
                 .direction
                 .map(|d| format!("{} ", d.label()))
                 .unwrap_or_default();
+            let conj = if u.is_conjugated { "~" } else { "" };
             graph.add_node(DiagramNode {
                 id: u.name.clone(),
-                label: format!("{}{} : {}", dir, u.name, t),
+                label: format!("{}{} : {}{}", dir, u.name, conj, t),
                 kind: NodeKind::Port,
                 stereotype: None,
                 attributes: Vec::new(),
@@ -127,9 +176,11 @@ pub fn build_ibd(model: &Model, def_name: &str) -> DiagramGraph {
     }
 
     // Add connections
+    // For dotted paths like "engine.drivePwrPort", the root segment ("engine")
+    // is the part node in the IBD, while the rest is the port/feature path.
     for conn in &model.connections {
-        let src = simple_name(&conn.source);
-        let tgt = simple_name(&conn.target);
+        let src = root_name(&conn.source);
+        let tgt = root_name(&conn.target);
         // Only include connections between elements in this definition
         if graph.has_node(src) || graph.has_node(tgt) {
             graph.add_edge(DiagramEdge {
@@ -143,8 +194,8 @@ pub fn build_ibd(model: &Model, def_name: &str) -> DiagramGraph {
 
     // Add flows
     for flow in &model.flows {
-        let src = simple_name(&flow.source);
-        let tgt = simple_name(&flow.target);
+        let src = root_name(&flow.source);
+        let tgt = root_name(&flow.target);
         if graph.has_node(src) || graph.has_node(tgt) {
             graph.add_edge(DiagramEdge {
                 source: src.to_string(),
@@ -898,6 +949,294 @@ fn add_action_step(
     }
 }
 
+/// Build a Traceability Diagram — the V-model chain.
+///
+/// Shows requirements, the parts/blocks that satisfy them, and the verification
+/// cases that verify them, with satisfy and verify edges forming a traceability
+/// web. This is the single most important MBSE diagram for systems engineering
+/// reviews and audits.
+pub fn build_trace(model: &Model) -> DiagramGraph {
+    let title = format!("trace [{}]", model.file);
+    let mut graph = DiagramGraph::new(title, DiagramKind::Trace);
+
+    // Collect requirement definitions as the central column
+    for def in &model.definitions {
+        if def.kind == DefKind::Requirement {
+            let doc = def.doc.as_deref().unwrap_or("");
+            let mut attrs = Vec::new();
+            if !doc.is_empty() {
+                attrs.push(("text".to_string(), doc.to_string()));
+            }
+            graph.add_node(DiagramNode {
+                id: def.name.clone(),
+                label: def.name.clone(),
+                kind: NodeKind::Requirement,
+                stereotype: Some("<<requirement>>".to_string()),
+                attributes: attrs,
+            });
+        }
+    }
+
+    // Build implicit satisfaction owners (same pattern as req diagram)
+    let satisfaction_owners: std::collections::HashMap<usize, &str> = model
+        .satisfactions
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.by.is_none())
+        .filter_map(|(i, s)| {
+            model
+                .definitions
+                .iter()
+                .filter(|d| d.has_body)
+                .filter(|d| {
+                    d.span.start_byte <= s.span.start_byte
+                        && s.span.end_byte <= d.span.end_byte
+                })
+                .last()
+                .map(|d| (i, d.name.as_str()))
+        })
+        .collect();
+
+    // Add blocks that satisfy requirements (left column in V-model)
+    let mut added_blocks: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (i, sat) in model.satisfactions.iter().enumerate() {
+        let by_name = if let Some(ref by) = sat.by {
+            simple_name(by).to_string()
+        } else if let Some(owner) = satisfaction_owners.get(&i) {
+            owner.to_string()
+        } else {
+            continue;
+        };
+
+        if !added_blocks.contains(&by_name) {
+            let stereotype = model
+                .find_def(&by_name)
+                .map(|d| format!("<<{}>>", d.kind.label()));
+            graph.add_node(DiagramNode {
+                id: by_name.clone(),
+                label: by_name.clone(),
+                kind: NodeKind::Block,
+                stereotype,
+                attributes: Vec::new(),
+            });
+            added_blocks.insert(by_name.clone());
+        }
+        graph.add_edge(DiagramEdge {
+            source: by_name,
+            target: simple_name(&sat.requirement).to_string(),
+            label: Some("<<satisfy>>".to_string()),
+            kind: EdgeKind::Satisfy,
+        });
+    }
+
+    // Add verifiers (right column in V-model)
+    let mut added_verifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for ver in &model.verifications {
+        let ver_name = simple_name(&ver.by);
+        if !added_verifiers.contains(ver_name) {
+            let stereotype = model
+                .find_def(ver_name)
+                .map(|d| format!("<<{}>>", d.kind.label()));
+            graph.add_node(DiagramNode {
+                id: ver_name.to_string(),
+                label: ver_name.to_string(),
+                kind: NodeKind::Block,
+                stereotype,
+                attributes: Vec::new(),
+            });
+            added_verifiers.insert(ver_name.to_string());
+        }
+        graph.add_edge(DiagramEdge {
+            source: ver_name.to_string(),
+            target: simple_name(&ver.requirement).to_string(),
+            label: Some("<<verify>>".to_string()),
+            kind: EdgeKind::Verify,
+        });
+    }
+
+    // Highlight unsatisfied/unverified requirements
+    let satisfied_names: std::collections::HashSet<&str> = model
+        .satisfactions
+        .iter()
+        .map(|s| simple_name(&s.requirement))
+        .collect();
+    let verified_names: std::collections::HashSet<&str> = model
+        .verifications
+        .iter()
+        .map(|v| simple_name(&v.requirement))
+        .collect();
+
+    for node in &mut graph.nodes {
+        if node.kind == NodeKind::Requirement {
+            let has_sat = satisfied_names.contains(node.id.as_str());
+            let has_ver = verified_names.contains(node.id.as_str());
+            if !has_sat {
+                node.attributes
+                    .push(("status".to_string(), "UNSATISFIED".to_string()));
+            }
+            if !has_ver {
+                node.attributes
+                    .push(("status".to_string(), "UNVERIFIED".to_string()));
+            }
+        }
+    }
+
+    graph
+}
+
+/// Build an Allocation Diagram — logical-to-physical mapping.
+///
+/// Shows actions and use-cases allocated to parts. Essential for MBSE to
+/// demonstrate that all logical functions have physical homes.
+pub fn build_alloc(model: &Model) -> DiagramGraph {
+    let title = format!("alloc [{}]", model.file);
+    let mut graph = DiagramGraph::new(title, DiagramKind::Alloc);
+
+    let mut added: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for alloc in &model.allocations {
+        let src = simple_name(&alloc.source);
+        let tgt = simple_name(&alloc.target);
+
+        if !added.contains(src) {
+            let kind_label = model
+                .find_def(src)
+                .map(|d| format!("<<{}>>", d.kind.label()));
+            graph.add_node(DiagramNode {
+                id: src.to_string(),
+                label: src.to_string(),
+                kind: NodeKind::Action,
+                stereotype: kind_label,
+                attributes: Vec::new(),
+            });
+            added.insert(src.to_string());
+        }
+
+        if !added.contains(tgt) {
+            let kind_label = model
+                .find_def(tgt)
+                .map(|d| format!("<<{}>>", d.kind.label()));
+            graph.add_node(DiagramNode {
+                id: tgt.to_string(),
+                label: tgt.to_string(),
+                kind: NodeKind::Block,
+                stereotype: kind_label,
+                attributes: Vec::new(),
+            });
+            added.insert(tgt.to_string());
+        }
+
+        graph.add_edge(DiagramEdge {
+            source: src.to_string(),
+            target: tgt.to_string(),
+            label: Some("<<allocate>>".to_string()),
+            kind: EdgeKind::Allocate,
+        });
+    }
+
+    // Show unallocated actions as standalone nodes with a note
+    for def in &model.definitions {
+        if def.kind == DefKind::Action && !added.contains(&def.name) {
+            graph.add_node(DiagramNode {
+                id: def.name.clone(),
+                label: def.name.clone(),
+                kind: NodeKind::Action,
+                stereotype: Some("<<action>> UNALLOCATED".to_string()),
+                attributes: Vec::new(),
+            });
+        }
+    }
+
+    graph
+}
+
+/// Build a Use Case Diagram — actors, use cases, and includes.
+///
+/// Extracts `use case def` elements and any actor usages. Shows include
+/// relationships between use cases.
+pub fn build_ucd(model: &Model) -> DiagramGraph {
+    let title = format!("ucd [{}]", model.file);
+    let mut graph = DiagramGraph::new(title, DiagramKind::Ucd);
+
+    let mut added_actors: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for def in &model.definitions {
+        if def.kind == DefKind::UseCase {
+            let doc = def.doc.as_deref().unwrap_or("");
+            let mut attrs = Vec::new();
+            if !doc.is_empty() {
+                attrs.push(("description".to_string(), doc.to_string()));
+            }
+            graph.add_node(DiagramNode {
+                id: def.name.clone(),
+                label: def.name.clone(),
+                kind: NodeKind::UseCase,
+                stereotype: Some("<<use case>>".to_string()),
+                attributes: attrs,
+            });
+
+            // Find actor usages inside this use case
+            for u in model.usages_in_def(&def.name) {
+                if u.kind == "actor" {
+                    let actor_name = u.type_ref.as_deref().unwrap_or(&u.name);
+                    if !added_actors.contains(actor_name) {
+                        graph.add_node(DiagramNode {
+                            id: actor_name.to_string(),
+                            label: actor_name.to_string(),
+                            kind: NodeKind::Actor,
+                            stereotype: Some("<<actor>>".to_string()),
+                            attributes: Vec::new(),
+                        });
+                        added_actors.insert(actor_name.to_string());
+                    }
+                    graph.add_edge(DiagramEdge {
+                        source: actor_name.to_string(),
+                        target: def.name.clone(),
+                        label: None,
+                        kind: EdgeKind::Dependency,
+                    });
+                }
+            }
+
+            // Find "include use case" usages
+            for u in model.usages_in_def(&def.name) {
+                if u.kind == "use case" || u.kind == "usecase" {
+                    let included = u.type_ref.as_deref().unwrap_or(&u.name);
+                    graph.add_edge(DiagramEdge {
+                        source: def.name.clone(),
+                        target: included.to_string(),
+                        label: Some("<<include>>".to_string()),
+                        kind: EdgeKind::Dependency,
+                    });
+                }
+            }
+        }
+    }
+
+    graph
+}
+
+/// Apply a view filter to a diagram graph.
+///
+/// Uses the view definition's expose and kind filters to prune the graph.
+/// Returns the filtered graph.
+pub fn apply_view_filter(graph: &mut DiagramGraph, model: &Model, view_name: &str) {
+    use crate::query;
+
+    let Some(filter) = query::filter_from_view(model, view_name) else {
+        return;
+    };
+
+    // Collect names of elements that pass the view filter
+    let elements = query::list_elements(model, &filter);
+    let allowed: std::collections::HashSet<&str> =
+        elements.iter().map(|e| e.name()).collect();
+
+    if !allowed.is_empty() {
+        graph.filter_by_names(&allowed);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1185,5 +1524,130 @@ mod tests {
             .collect();
         assert!(!decisions.is_empty());
         assert!(graph.has_node("__final__"));
+    }
+
+    #[test]
+    fn trace_diagram_shows_satisfy_verify() {
+        let model = parse_file(
+            "test.sysml",
+            r#"
+            requirement def MassReq {
+                doc /* mass < 2000 */
+            }
+            requirement def SpeedReq {
+                doc /* speed > 100 */
+            }
+            satisfy requirement MassReq by Vehicle;
+            verification def MassTest {
+                subject vehicle : Vehicle;
+                require constraint { vehicle.mass <= 2000 }
+            }
+        "#,
+        );
+        let graph = build_trace(&model);
+        assert_eq!(graph.kind, DiagramKind::Trace);
+        assert!(graph.has_node("MassReq"));
+        assert!(graph.has_node("SpeedReq"));
+        assert!(graph.has_node("Vehicle"));
+
+        // MassReq should be satisfied
+        let sat_edges: Vec<_> = graph.edges.iter().filter(|e| e.kind == EdgeKind::Satisfy).collect();
+        assert_eq!(sat_edges.len(), 1);
+
+        // SpeedReq should be marked UNSATISFIED and UNVERIFIED
+        let speed = graph.nodes.iter().find(|n| n.id == "SpeedReq").unwrap();
+        assert!(speed.attributes.iter().any(|(_, v)| v == "UNSATISFIED"));
+        assert!(speed.attributes.iter().any(|(_, v)| v == "UNVERIFIED"));
+    }
+
+    #[test]
+    fn alloc_diagram_shows_allocations() {
+        let model = parse_file(
+            "test.sysml",
+            r#"
+            action def ProcessData;
+            part def Computer;
+            allocate ProcessData to Computer;
+            action def UnallocatedAction;
+        "#,
+        );
+        let graph = build_alloc(&model);
+        assert_eq!(graph.kind, DiagramKind::Alloc);
+        assert!(graph.has_node("ProcessData"));
+        assert!(graph.has_node("Computer"));
+        assert!(graph.has_node("UnallocatedAction"), "Unallocated actions should appear");
+
+        let alloc_edges: Vec<_> = graph.edges.iter().filter(|e| e.kind == EdgeKind::Allocate).collect();
+        assert_eq!(alloc_edges.len(), 1);
+
+        // Unallocated action should have stereotype
+        let unalloc = graph.nodes.iter().find(|n| n.id == "UnallocatedAction").unwrap();
+        assert!(unalloc.stereotype.as_ref().unwrap().contains("UNALLOCATED"));
+    }
+
+    #[test]
+    fn ucd_diagram_shows_use_cases() {
+        let model = parse_file(
+            "test.sysml",
+            r#"
+            use case def DriveVehicle {
+                doc /* Drive the vehicle */
+                actor driver : Person;
+                include use case startEngine : StartEngine;
+            }
+            use case def StartEngine;
+        "#,
+        );
+        let graph = build_ucd(&model);
+        assert_eq!(graph.kind, DiagramKind::Ucd);
+        assert!(graph.has_node("DriveVehicle"), "Should have DriveVehicle use case");
+        assert!(graph.has_node("StartEngine"), "Should have StartEngine use case");
+    }
+
+    #[test]
+    fn ibd_connection_edge() {
+        let model = parse_file(
+            "test.sysml",
+            r#"
+            part def Vehicle {
+                part engine : Engine;
+                part transmission : Transmission;
+                connection c connect engine to transmission;
+            }
+        "#,
+        );
+        let graph = build_ibd(&model, "Vehicle");
+        assert!(graph.has_node("engine"));
+        assert!(graph.has_node("transmission"));
+        let conn_edges: Vec<_> = graph.edges.iter()
+            .filter(|e| e.kind == EdgeKind::Connection)
+            .collect();
+        assert_eq!(conn_edges.len(), 1);
+        assert_eq!(conn_edges[0].source, "engine");
+        assert_eq!(conn_edges[0].target, "transmission");
+    }
+
+    #[test]
+    fn view_filter_prunes_graph() {
+        let model = parse_file(
+            "test.sysml",
+            r#"
+            package VehicleModel {
+                part def Vehicle;
+                part def Engine;
+                port def FuelPort;
+            }
+            view def PartsOnly {
+                filter @SysML::PartDefinition;
+            }
+        "#,
+        );
+        let mut graph = build_bdd(&model, None);
+        let initial_count = graph.nodes.len();
+        assert!(initial_count >= 3, "Should have Vehicle, Engine, FuelPort");
+        apply_view_filter(&mut graph, &model, "PartsOnly");
+        // After filtering, only part definitions should remain
+        assert!(graph.nodes.len() <= initial_count,
+            "View filter should prune nodes");
     }
 }

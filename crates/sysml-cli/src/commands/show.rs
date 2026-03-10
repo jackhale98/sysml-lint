@@ -5,12 +5,31 @@ use sysml_core::parser as sysml_parser;
 
 use crate::{Cli, read_source};
 
-pub(crate) fn run(cli: &Cli, file: &PathBuf, element: &str) -> ExitCode {
+pub(crate) fn run(cli: &Cli, file: &PathBuf, element: &str, raw: bool) -> ExitCode {
     let (path_str, source) = match read_source(file) {
         Ok(v) => v,
         Err(code) => return code,
     };
     let model = sysml_parser::parse_file(&path_str, &source);
+
+    // --raw mode: extract and print original SysML source text
+    if raw {
+        // Try definition first, then usage
+        let span = model.find_def(element)
+            .map(|d| &d.span)
+            .or_else(|| model.usages.iter().find(|u| u.name == element).map(|u| &u.span));
+        match span {
+            Some(span) => {
+                let text = &source[span.start_byte..span.end_byte];
+                println!("{}", text);
+                return ExitCode::SUCCESS;
+            }
+            None => {
+                eprintln!("error: element `{}` not found in `{}`", element, path_str);
+                return ExitCode::from(1);
+            }
+        }
+    }
 
     // Try to find as a definition first, then as a usage
     if let Some(def) = model.find_def(element) {

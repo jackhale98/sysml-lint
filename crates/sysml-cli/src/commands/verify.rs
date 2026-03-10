@@ -11,6 +11,7 @@ pub fn run(cli: &crate::Cli, kind: &VerifyCommand) -> ExitCode {
         VerifyCommand::List { files } => run_list(cli, files),
         VerifyCommand::Status { files } => run_status(cli, files),
         VerifyCommand::Add { file, inside } => run_add(file.as_ref(), inside.as_deref()),
+        VerifyCommand::Run { files, case, author } => run_execute(files, case.as_deref(), author),
     }
 }
 
@@ -210,6 +211,121 @@ fn run_add(file: Option<&PathBuf>, inside: Option<&str>) -> ExitCode {
     } else {
         println!("{}", sysml_text);
         ExitCode::SUCCESS
+    }
+}
+
+fn run_execute(files: &[PathBuf], case: Option<&str>, author: &str) -> ExitCode {
+    use sysml_core::interactive::{run_wizard, WizardRunner};
+    use crate::wizard::CliWizardRunner;
+
+    let runner = CliWizardRunner::new();
+    if !runner.is_interactive() {
+        eprintln!("error: `verify run` requires an interactive terminal");
+        return ExitCode::FAILURE;
+    }
+
+    let models = match parse_files(files) {
+        Some(m) => m,
+        None => return ExitCode::FAILURE,
+    };
+
+    // Extract all verification cases
+    let mut all_cases = Vec::new();
+    for model in &models {
+        all_cases.extend(sysml_verify::extract_verification_cases(model));
+    }
+
+    if all_cases.is_empty() {
+        eprintln!("No verification cases found in the provided files.");
+        return ExitCode::FAILURE;
+    }
+
+    // Select case
+    let vc = if let Some(name) = case {
+        match all_cases.iter().find(|c| c.name == name) {
+            Some(c) => c.clone(),
+            None => {
+                eprintln!("error: verification case '{}' not found", name);
+                eprintln!("Available cases:");
+                for c in &all_cases {
+                    eprintln!("  {}", c.name);
+                }
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        let names: Vec<&str> = all_cases.iter().map(|c| c.name.as_str()).collect();
+        let choice = crate::select_item("Select verification case to run:", &names);
+        match choice {
+            Some(idx) => all_cases[idx].clone(),
+            None => {
+                eprintln!("Cancelled.");
+                return ExitCode::FAILURE;
+            }
+        }
+    };
+
+    // Display pre-test info
+    eprintln!("Verification Case: {}", vc.name);
+    if !vc.requirements.is_empty() {
+        eprintln!("  Verifies: {}", vc.requirements.join(", "));
+    }
+    eprintln!("  Steps: {}", vc.steps.len());
+    eprintln!();
+
+    // Build and run wizard
+    let steps = sysml_verify::build_wizard_steps(&vc);
+    let result = match run_wizard(&runner, &steps) {
+        Some(r) => r,
+        None => {
+            eprintln!("Cancelled.");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Interpret results
+    let execution = sysml_verify::interpret_wizard_result(&result, &vc);
+
+    // Display summary
+    eprintln!();
+    let result_label = match &execution.result {
+        sysml_verify::ExecutionResult::Pass => "PASS",
+        sysml_verify::ExecutionResult::Fail => "FAIL",
+        sysml_verify::ExecutionResult::ConditionalPass(c) => {
+            eprintln!("Result: CONDITIONAL PASS — {}", c);
+            "CONDITIONAL PASS"
+        }
+        sysml_verify::ExecutionResult::Blocked(r) => {
+            eprintln!("Result: BLOCKED — {}", r);
+            "BLOCKED"
+        }
+    };
+    if !matches!(&execution.result, sysml_verify::ExecutionResult::ConditionalPass(_) | sysml_verify::ExecutionResult::Blocked(_)) {
+        eprintln!("Result: {}", result_label);
+    }
+    if !execution.measurements.is_empty() {
+        eprintln!("Measurements:");
+        for m in &execution.measurements {
+            let spec_mark = if m.within_spec { "OK" } else { "OUT OF SPEC" };
+            eprintln!("  {} = {} {} [{}]", m.name, m.value, m.unit, spec_mark);
+        }
+    }
+    if !execution.notes.is_empty() {
+        eprintln!("Notes: {}", execution.notes);
+    }
+
+    // Write record
+    let record = sysml_verify::create_execution_record(&execution, author);
+    let records_dir = crate::records::resolve_records_dir();
+    match crate::records::write_record(&record, &records_dir) {
+        Ok(path) => {
+            eprintln!("\nRecord written: {}", path.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error writing record: {}", e);
+            ExitCode::FAILURE
+        }
     }
 }
 

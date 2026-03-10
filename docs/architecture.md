@@ -71,7 +71,7 @@ src/
     template.rs           SysML definition template generation
     edit.rs               Byte-accurate surgical text edits
     format.rs             CST-aware source formatting
-  diagram/                Diagram generation (7 types, 4 formats)
+  diagram/                Diagram generation (10 types, 4 formats)
   export/                 FMI 3.0, Modelica, SSP export
   query.rs                Model querying (list, show, trace, stats, deps, diff, allocation, coverage)
 ```

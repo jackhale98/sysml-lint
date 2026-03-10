@@ -40,6 +40,21 @@ sysml verify add --file model.sysml
 sysml verify add                        # prints to stdout
 ```
 
+### verify run
+
+Execute a verification case interactively, recording results step-by-step. Writes a TOML execution record to `.sysml/records/`.
+
+```sh
+sysml verify run model.sysml
+sysml verify run model.sysml --case TestBrakes
+sysml verify run model.sysml --author "Jane Smith"
+```
+
+| Option | Description |
+|--------|-------------|
+| `--case <NAME>` | Verification case to run (prompted if omitted) |
+| `--author <NAME>` | Author name for the execution record (default: `engineer`) |
+
 ## risk
 
 Risk management: identification, assessment, matrix visualization, and FMEA.
@@ -233,6 +248,36 @@ sysml mfg spc --parameter Temperature --values "150.1,149.8,150.3,150.0,149.9"
 | `--values <VALUES>` | Comma-separated measurement values (required) |
 
 Output includes mean, standard deviation, UCL/LCL (control limits at 3 sigma), and out-of-control flags.
+
+### mfg start-lot
+
+Start a new production lot for a manufacturing routing. Creates a lot record with a unique ID and writes it to `.sysml/records/`.
+
+```sh
+sysml mfg start-lot model.sysml
+sysml mfg start-lot model.sysml --routing AssembleWidget --quantity 100
+sysml mfg start-lot model.sysml --lot-type prototype --quantity 5
+```
+
+| Option | Description |
+|--------|-------------|
+| `--routing <NAME>` | Routing name (prompted if omitted) |
+| `--quantity <N>` | Lot quantity (default: 1) |
+| `--lot-type <TYPE>` | Lot type: `production`, `prototype`, `first-article` (default: `production`) |
+| `--author <NAME>` | Author name for the record (default: `engineer`) |
+
+### mfg step
+
+Execute the next step of an active lot interactively. Prompts for parameter readings, validates against control limits, and advances the lot.
+
+```sh
+sysml mfg step LOT-ID
+sysml mfg step mfg-lot-abc123
+```
+
+| Option | Description |
+|--------|-------------|
+| `--author <NAME>` | Author name for the record (default: `engineer`) |
 
 ## qc
 

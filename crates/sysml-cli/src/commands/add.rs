@@ -185,6 +185,9 @@ fn run_stdout(
 }
 
 /// Concept-first interactive wizard for `sysml add` with no arguments.
+///
+/// Flow: select file → parse model context → choose what to create →
+/// fill in details with model-aware prompts → preview → write.
 fn run_wizard_mode() -> ExitCode {
     use sysml_core::interactive::*;
     use crate::wizard::CliWizardRunner;
@@ -196,7 +199,155 @@ fn run_wizard_mode() -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // Step 1: What are you creating?
+    // Step 1: Choose destination first so we can parse the model context
+    let dest_step = WizardStep::choice(
+        "destination",
+        "Where will this element go?",
+        vec![
+            ("file", "Add to an existing file (model-aware)"),
+            ("stdout", "Print to terminal (no file context)"),
+        ],
+    ).with_explanation("Choosing a file lets the wizard show available types from your model.");
+
+    let dest = match runner.run_step(&dest_step) {
+        Some(WizardAnswer::String(s)) => s,
+        _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+    };
+
+    // Parse model context if a file is selected
+    let (target_file, model) = if dest == "file" {
+        let target = match crate::model_writer::select_target_file(std::path::Path::new(".")) {
+            Some(p) => p,
+            None => {
+                eprintln!("No .sysml files found. Switching to stdout mode.");
+                return run_wizard_with_context(&runner, None, None);
+            }
+        };
+        let model = parse_file_context(&target);
+        (Some(target), model)
+    } else {
+        (None, None)
+    };
+
+    run_wizard_with_context(&runner, target_file.as_ref(), model.as_ref())
+}
+
+/// Guided file mode: `sysml add <file>` with no kind/name.
+fn run_wizard_mode_with_file(file: &PathBuf) -> ExitCode {
+    use sysml_core::interactive::WizardRunner;
+    use crate::wizard::CliWizardRunner;
+
+    let runner = CliWizardRunner::new();
+    if !runner.is_interactive() {
+        eprintln!("error: guided mode requires an interactive terminal");
+        eprintln!("Usage: sysml add <file> <kind> <name>");
+        return ExitCode::from(1);
+    }
+
+    let model = parse_file_context(file);
+    run_wizard_with_context(&runner, Some(file), model.as_ref())
+}
+
+/// Parse a file and collect all .sysml files in the same directory for context.
+fn parse_file_context(file: &PathBuf) -> Option<sysml_core::model::Model> {
+    let (path_str, source) = read_source(file).ok()?;
+    let mut model = sysml_parser::parse_file(&path_str, &source);
+
+    // Also parse sibling .sysml files in the same directory for type context
+    if let Some(parent_dir) = file.parent() {
+        let mut sibling_files = Vec::new();
+        crate::collect_files_recursive(&parent_dir.to_path_buf(), &mut sibling_files);
+        for sibling in &sibling_files {
+            if sibling == file { continue; }
+            if let Ok((sib_path, sib_source)) = read_source(sibling) {
+                let sib_model = sysml_parser::parse_file(&sib_path, &sib_source);
+                model.definitions.extend(sib_model.definitions.into_iter());
+                model.usages.extend(sib_model.usages.into_iter());
+            }
+        }
+    }
+
+    Some(model)
+}
+
+
+/// Get definition names from the model that match a given DefKind.
+fn model_type_options(
+    model: &sysml_core::model::Model,
+    usage_kind: &str,
+) -> Vec<String> {
+    use sysml_core::model::DefKind;
+    let target = match usage_kind {
+        "part" => Some(DefKind::Part),
+        "port" => Some(DefKind::Port),
+        "action" => Some(DefKind::Action),
+        "state" => Some(DefKind::State),
+        "attribute" => Some(DefKind::Attribute),
+        "item" => Some(DefKind::Item),
+        _ => None,
+    };
+    match target {
+        Some(dk) => model.definitions.iter()
+            .filter(|d| d.kind == dk)
+            .map(|d| d.name.clone())
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// Get definition names suitable as supertypes for a given definition kind.
+fn model_supertype_options(
+    model: &sysml_core::model::Model,
+    kind: &str,
+) -> Vec<String> {
+    use sysml_core::model::DefKind;
+    let target = match kind {
+        "part-def" => Some(DefKind::Part),
+        "port-def" => Some(DefKind::Port),
+        "action-def" => Some(DefKind::Action),
+        "state-def" => Some(DefKind::State),
+        "attribute-def" | "attr" => Some(DefKind::Attribute),
+        "requirement" | "req" => Some(DefKind::Requirement),
+        "constraint-def" => Some(DefKind::Constraint),
+        "calc-def" => Some(DefKind::Calc),
+        "enum-def" => Some(DefKind::Enum),
+        "item-def" => Some(DefKind::Item),
+        _ => None,
+    };
+    match target {
+        Some(dk) => model.definitions.iter()
+            .filter(|d| d.kind == dk)
+            .map(|d| d.name.clone())
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// Core wizard logic shared between no-args and file modes.
+fn run_wizard_with_context(
+    runner: &crate::wizard::CliWizardRunner,
+    target_file: Option<&PathBuf>,
+    model: Option<&sysml_core::model::Model>,
+) -> ExitCode {
+    use sysml_core::interactive::*;
+
+    // Show file context if available
+    if let Some(m) = model {
+        let def_names: Vec<&str> = m.definitions.iter()
+            .take(15)
+            .map(|d| d.name.as_str())
+            .collect();
+        if !def_names.is_empty() {
+            let suffix = if m.definitions.len() > 15 {
+                format!(" (+{} more)", m.definitions.len() - 15)
+            } else {
+                String::new()
+            };
+            eprintln!("Available types: {}{}", def_names.join(", "), suffix);
+        }
+    }
+
+    // Step: What are you creating?
     let concept_step = WizardStep::choice(
         "concept",
         "What are you creating?",
@@ -237,43 +388,149 @@ fn run_wizard_mode() -> ExitCode {
     let is_def = kind.contains("def") || kind.contains("package") || kind.contains("pkg")
         || kind == "requirement";
 
-    // Step 2: Name
+    // Name
     let name_step = WizardStep::string("name", "Name");
     let name = match runner.run_step(&name_step) {
         Some(WizardAnswer::String(s)) if !s.is_empty() => s,
         _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
     };
 
-    // Step 3: Doc (optional)
+    // Doc (optional)
     let doc_step = WizardStep::string("doc", "Brief description (Enter to skip)").optional();
     let doc = match runner.run_step(&doc_step) {
         Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
         _ => None,
     };
 
-    // Step 4: For definitions — extends? For usages — type reference?
+    // For definitions — extends? (with model-aware choices)
     let extends = if is_def {
-        let ext_step = WizardStep::string("extends", "Extend another type? (Enter to skip)").optional();
-        match runner.run_step(&ext_step) {
-            Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
-            _ => None,
+        if let Some(m) = model {
+            let supertypes = model_supertype_options(m, &kind);
+            if !supertypes.is_empty() {
+                // Offer model types as choices plus a "none" and "custom" option
+                // Build the step manually with ChoiceOption for owned strings
+                let mut choice_options: Vec<ChoiceOption> = vec![
+                    ChoiceOption {
+                        value: "".into(),
+                        label: "(none)".into(),
+                        description: Some("No supertype".into()),
+                    },
+                ];
+                for st in &supertypes {
+                    choice_options.push(ChoiceOption {
+                        value: st.clone(),
+                        label: st.clone(),
+                        description: None,
+                    });
+                }
+                choice_options.push(ChoiceOption {
+                    value: "__custom__".into(),
+                    label: "(other)".into(),
+                    description: Some("Enter a type name manually".into()),
+                });
+
+                let ext_step = WizardStep {
+                    id: "extends".into(),
+                    prompt: format!("Extend another {} type?", kind.replace("-def", "")),
+                    explanation: Some(format!("Available {}s from your model", kind.replace("-def", ""))),
+                    kind: PromptKind::Choice(choice_options),
+                    required: false,
+                    default: None,
+                };
+                match runner.run_step(&ext_step) {
+                    Some(WizardAnswer::String(s)) if s == "__custom__" => {
+                        let custom = WizardStep::string("extends_custom", "Type name");
+                        match runner.run_step(&custom) {
+                            Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                            _ => None,
+                        }
+                    }
+                    Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                    _ => None,
+                }
+            } else {
+                let ext_step = WizardStep::string("extends", "Extend another type? (Enter to skip)").optional();
+                match runner.run_step(&ext_step) {
+                    Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                    _ => None,
+                }
+            }
+        } else {
+            let ext_step = WizardStep::string("extends", "Extend another type? (Enter to skip)").optional();
+            match runner.run_step(&ext_step) {
+                Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                _ => None,
+            }
         }
     } else {
         None
     };
 
+    // For usages — type reference (with model-aware choices)
     let type_ref = if !is_def {
-        let type_step = WizardStep::string("type_ref", "Type reference? (Enter to skip)")
-            .with_explanation("The definition this usage instantiates.");
-        match runner.run_step(&type_step.optional()) {
-            Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
-            _ => None,
+        if let Some(m) = model {
+            let available_types = model_type_options(m, &kind);
+            if !available_types.is_empty() {
+                let mut choice_options: Vec<ChoiceOption> = vec![
+                    ChoiceOption {
+                        value: "".into(),
+                        label: "(none)".into(),
+                        description: Some("No type reference".into()),
+                    },
+                ];
+                for t in &available_types {
+                    choice_options.push(ChoiceOption {
+                        value: t.clone(),
+                        label: t.clone(),
+                        description: None,
+                    });
+                }
+                choice_options.push(ChoiceOption {
+                    value: "__custom__".into(),
+                    label: "(other)".into(),
+                    description: Some("Enter a type name manually".into()),
+                });
+
+                let type_step = WizardStep {
+                    id: "type_ref".into(),
+                    prompt: format!("Type for this {} usage?", kind),
+                    explanation: Some(format!("Available {} definitions from your model", kind)),
+                    kind: PromptKind::Choice(choice_options),
+                    required: false,
+                    default: None,
+                };
+                match runner.run_step(&type_step) {
+                    Some(WizardAnswer::String(s)) if s == "__custom__" => {
+                        let custom = WizardStep::string("type_custom", "Type name");
+                        match runner.run_step(&custom) {
+                            Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                            _ => None,
+                        }
+                    }
+                    Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                    _ => None,
+                }
+            } else {
+                let type_step = WizardStep::string("type_ref", "Type reference? (Enter to skip)")
+                    .with_explanation("The definition this usage instantiates.").optional();
+                match runner.run_step(&type_step) {
+                    Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                    _ => None,
+                }
+            }
+        } else {
+            let type_step = WizardStep::string("type_ref", "Type reference? (Enter to skip)")
+                .with_explanation("The definition this usage instantiates.").optional();
+            match runner.run_step(&type_step) {
+                Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                _ => None,
+            }
         }
     } else {
         None
     };
 
-    // Step 5: Generate SysML text
+    // Generate SysML text
     let sysml_text = if is_def {
         if let Some(def_kind) = template::parse_template_kind(&kind) {
             let opts = template::TemplateOptions {
@@ -307,204 +564,28 @@ fn run_wizard_mode() -> ExitCode {
     }
     eprintln!();
 
-    // Step 6: Where to put it?
-    let dest_step = WizardStep::choice(
-        "destination",
-        "Where should it go?",
-        vec![
-            ("stdout", "Print to terminal"),
-            ("file", "Add to existing file"),
-        ],
-    );
-    let dest = match runner.run_step(&dest_step) {
-        Some(WizardAnswer::String(s)) => s,
-        _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
-    };
+    // Write
+    if let Some(target) = target_file {
+        // For usages, ask which definition to insert inside
+        let inside = if !is_def {
+            crate::model_writer::select_parent_def(target)
+        } else {
+            None
+        };
 
-    if dest == "stdout" {
+        match crate::model_writer::write_to_model(target, &sysml_text, inside.as_deref()) {
+            Ok(()) => {
+                eprintln!("Wrote {} to {}", name, target.display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::FAILURE
+            }
+        }
+    } else {
         println!("{}", sysml_text);
-        return ExitCode::SUCCESS;
-    }
-
-    // Select target file
-    let target = match crate::model_writer::select_target_file(std::path::Path::new(".")) {
-        Some(p) => p,
-        None => {
-            eprintln!("No file selected. Printing to stdout:");
-            println!("{}", sysml_text);
-            return ExitCode::SUCCESS;
-        }
-    };
-
-    // For usages, ask which definition to insert inside
-    let inside = if !is_def {
-        crate::model_writer::select_parent_def(&target)
-    } else {
-        None
-    };
-
-    match crate::model_writer::write_to_model(&target, &sysml_text, inside.as_deref()) {
-        Ok(()) => {
-            eprintln!("Wrote {} to {}", name, target.display());
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::FAILURE
-        }
-    }
-}
-
-/// Guided file mode: `sysml add <file>` with no kind/name.
-fn run_wizard_mode_with_file(file: &PathBuf) -> ExitCode {
-    use sysml_core::interactive::*;
-    use crate::wizard::CliWizardRunner;
-
-    let runner = CliWizardRunner::new();
-    if !runner.is_interactive() {
-        eprintln!("error: guided mode requires an interactive terminal");
-        eprintln!("Usage: sysml add <file> <kind> <name>");
-        return ExitCode::from(1);
-    }
-
-    let (path_str, source) = match read_source(file) {
-        Ok(v) => v,
-        Err(code) => return code,
-    };
-    let model = sysml_parser::parse_file(&path_str, &source);
-
-    // Show what's in the file
-    let def_names: Vec<&str> = model.definitions.iter().map(|d| d.name.as_str()).collect();
-    if !def_names.is_empty() {
-        eprintln!("File contains: {}", def_names.join(", "));
-    }
-
-    // Ask what kind to add
-    let concept_step = WizardStep::choice(
-        "concept",
-        "What do you want to add?",
-        vec![
-            ("part-def", "New definition (part, port, action, etc.)"),
-            ("part", "New usage inside a definition"),
-        ],
-    );
-    let is_def = match runner.run_step(&concept_step) {
-        Some(WizardAnswer::String(s)) => s.contains("def"),
-        _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
-    };
-
-    if is_def {
-        // For definitions, ask kind and name then insert at top level
-        let kind_step = WizardStep::choice("kind", "Definition kind", vec![
-            ("part-def", "part def"),
-            ("port-def", "port def"),
-            ("action-def", "action def"),
-            ("requirement", "requirement def"),
-            ("state-def", "state def"),
-            ("attribute-def", "attribute def"),
-            ("enum-def", "enum def"),
-            ("calc-def", "calc def"),
-        ]);
-        let kind = match runner.run_step(&kind_step) {
-            Some(WizardAnswer::String(s)) => s,
-            _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
-        };
-
-        let name_step = WizardStep::string("name", "Name");
-        let name = match runner.run_step(&name_step) {
-            Some(WizardAnswer::String(s)) if !s.is_empty() => s,
-            _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
-        };
-
-        let doc_step = WizardStep::string("doc", "Description (Enter to skip)").optional();
-        let doc = match runner.run_step(&doc_step) {
-            Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
-            _ => None,
-        };
-
-        let def_kind = match template::parse_template_kind(&kind) {
-            Some(k) => k,
-            None => { eprintln!("error: unknown kind `{}`", kind); return ExitCode::FAILURE; }
-        };
-
-        let sysml_text = template::generate_template(&template::TemplateOptions {
-            kind: def_kind,
-            name: name.clone(),
-            super_type: None,
-            is_abstract: false,
-            short_name: None,
-            doc,
-            members: Vec::new(),
-            exposes: Vec::new(),
-            filter: None,
-            indent: 0,
-        });
-
-        eprintln!("\nPreview:");
-        for line in sysml_text.lines() {
-            eprintln!("  {}", line);
-        }
-        eprintln!();
-
-        match crate::model_writer::write_to_model(file, &sysml_text, None) {
-            Ok(()) => {
-                eprintln!("Added `{}` to {}", name, path_str);
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::FAILURE
-            }
-        }
-    } else {
-        // For usages, ask kind, name, type, and parent
-        let kind_step = WizardStep::choice("kind", "Usage kind", vec![
-            ("part", "part"),
-            ("port", "port"),
-            ("attribute", "attribute"),
-            ("action", "action"),
-            ("state", "state"),
-            ("item", "item"),
-        ]);
-        let kind = match runner.run_step(&kind_step) {
-            Some(WizardAnswer::String(s)) => s,
-            _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
-        };
-
-        let name_step = WizardStep::string("name", "Name");
-        let name = match runner.run_step(&name_step) {
-            Some(WizardAnswer::String(s)) if !s.is_empty() => s,
-            _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
-        };
-
-        let type_step = WizardStep::string("type_ref", "Type reference (Enter to skip)").optional();
-        let type_ref = match runner.run_step(&type_step) {
-            Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
-            _ => None,
-        };
-
-        let t = type_ref.as_deref()
-            .map(|t| format!(" : {}", t))
-            .unwrap_or_default();
-        let sysml_text = format!("{} {}{};", kind, name, t);
-
-        // Ask which definition to insert inside
-        let inside = crate::model_writer::select_parent_def(file);
-
-        eprintln!("\nPreview:");
-        eprintln!("  {}", sysml_text);
-        eprintln!();
-
-        match crate::model_writer::write_to_model(file, &sysml_text, inside.as_deref()) {
-            Ok(()) => {
-                eprintln!("Added `{}` to {}", name, path_str);
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::FAILURE
-            }
-        }
+        ExitCode::SUCCESS
     }
 }
 

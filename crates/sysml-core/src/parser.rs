@@ -618,7 +618,19 @@ fn walk_node_scoped(
         // --- Usages ---
         k if usage_kind_from_node(k).is_some() => {
             let usage_kind = usage_kind_from_node(k).unwrap();
-            if let Some(name) = field_text(&node, "name", source) {
+            let redefinition = get_redefinition(&node, source);
+            let subsets = get_subsets(&node, source);
+            // Fall back to redefines/subsets target as usage name
+            // (e.g. `part redefines foo { ... }` → name is "foo")
+            let name = field_text(&node, "name", source)
+                .or_else(|| redefinition.as_ref().map(|r| {
+                    // Strip qualified prefix: "vehicle_C1::rearAxle" → "rearAxle"
+                    r.rsplit("::").next().unwrap_or(r).to_string()
+                }))
+                .or_else(|| subsets.as_ref().map(|s| {
+                    s.rsplit("::").next().unwrap_or(s).to_string()
+                }));
+            if let Some(name) = name {
                 let type_ref = get_type_ref(&node, source);
                 if let Some(ref t) = type_ref {
                     model.type_references.push(TypeReference {
@@ -631,8 +643,6 @@ fn walk_node_scoped(
                 let multiplicity = get_multiplicity(&node, source);
                 let value_expr = get_value_expr(&node, source);
                 let short_name = get_short_name(&node, source);
-                let redefinition = get_redefinition(&node, source);
-                let subsets = get_subsets(&node, source);
                 model.usages.push(Usage {
                     kind: usage_kind.to_string(),
                     name: name.clone(),
@@ -649,8 +659,8 @@ fn walk_node_scoped(
                     qualified_name: None,
                 });
 
-                // Connection usages have connect clauses
-                if k == "connection_usage" {
+                // Connection and interface usages can have connect clauses
+                if k == "connection_usage" || k == "interface_usage" {
                     extract_connect_clause(&node, source, model);
                 }
 
@@ -667,8 +677,8 @@ fn walk_node_scoped(
                     return; // Already recursed with updated scope
                 }
             } else {
-                // Connection usages without names (e.g. anonymous connections)
-                if k == "connection_usage" {
+                // Connection/interface usages without names
+                if k == "connection_usage" || k == "interface_usage" {
                     extract_connect_clause(&node, source, model);
                 }
             }
@@ -740,18 +750,50 @@ fn walk_node_scoped(
 }
 
 /// Extract connection endpoints from a connect_clause.
+///
+/// Handles two forms:
+///   connect a.x to b.y              → source="a.x", target="b.y"
+///   connect ep1 ::> a.x to ep2 ::> b.y  → source="a.x", target="b.y"
+///
+/// When an endpoint has a binding (`::>`), the binding's feature chain is
+/// the actual reference; the preceding qualified_name is just a local alias.
 fn extract_connect_clause(node: &Node, source: &[u8], model: &mut Model) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "connect_clause" {
+            // Collect children into a vec for lookahead
+            let children: Vec<_> = {
+                let mut cc_cursor = child.walk();
+                child.children(&mut cc_cursor).collect()
+            };
             let mut refs = Vec::new();
-            let mut cc_cursor = child.walk();
-            for cc_child in child.children(&mut cc_cursor) {
+            let mut i = 0;
+            while i < children.len() {
+                let cc_child = &children[i];
                 match cc_child.kind() {
                     "qualified_name" | "feature_chain" | "identifier" => {
-                        refs.push(node_text(&cc_child, source).to_string());
+                        // Check if next sibling is a binding (::> ref)
+                        if i + 1 < children.len() && children[i + 1].kind() == "binding" {
+                            // Use the binding's feature chain / qualified_name
+                            let binding = &children[i + 1];
+                            let mut b_cursor = binding.walk();
+                            for b_child in binding.children(&mut b_cursor) {
+                                if b_child.kind() == "feature_chain"
+                                    || b_child.kind() == "qualified_name"
+                                {
+                                    refs.push(node_text(&b_child, source).to_string());
+                                    break;
+                                }
+                            }
+                            i += 2; // skip both the name and the binding
+                        } else {
+                            refs.push(node_text(cc_child, source).to_string());
+                            i += 1;
+                        }
                     }
-                    _ => {}
+                    _ => {
+                        i += 1;
+                    }
                 }
             }
             if refs.len() >= 2 {

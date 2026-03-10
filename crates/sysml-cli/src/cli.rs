@@ -118,6 +118,7 @@ pub(crate) enum Command {
     ///
     /// Displays all known information about a named definition or usage:
     /// kind, visibility, parent, documentation, type, children, and relationships.
+    /// Use --raw to print the original SysML source text for the element.
     Show {
         /// SysML v2 file to inspect.
         #[arg(required = true)]
@@ -126,6 +127,10 @@ pub(crate) enum Command {
         /// Name of the element to show.
         #[arg(required = true)]
         element: String,
+
+        /// Print the raw SysML source text of the element.
+        #[arg(long)]
+        raw: bool,
     },
     /// Generate a requirements traceability matrix.
     ///
@@ -163,14 +168,19 @@ pub(crate) enum Command {
     ///
     /// Produces diagrams in Mermaid, PlantUML, DOT, or D2 format.
     ///
-    /// DIAGRAM TYPES:
-    ///   bdd  — Block Definition Diagram (definitions and relationships)
-    ///   ibd  — Internal Block Diagram (internal structure of a part)
-    ///   stm  — State Machine Diagram (states and transitions)
-    ///   act  — Activity Diagram (action flow with decisions/forks)
-    ///   req  — Requirements Diagram (requirements and trace status)
-    ///   pkg  — Package Diagram (packages and containment hierarchy)
-    ///   par  — Parametric Diagram (constraints and parameters)
+    /// DIAGRAM TYPES (standard SysML v2):
+    ///   bdd    — Block Definition Diagram (definitions and relationships)
+    ///   ibd    — Internal Block Diagram (internal structure of a part)
+    ///   stm    — State Machine Diagram (states and transitions)
+    ///   act    — Activity Diagram (action flow with decisions/forks)
+    ///   req    — Requirements Diagram (requirements and trace status)
+    ///   pkg    — Package Diagram (packages and containment hierarchy)
+    ///   par    — Parametric Diagram (constraints and parameters)
+    ///
+    /// DIAGRAM TYPES (MBSE analysis):
+    ///   trace  — Traceability Diagram (V-model: requirements → satisfy → verify)
+    ///   alloc  — Allocation Diagram (logical functions → physical parts)
+    ///   ucd    — Use Case Diagram (actors and use cases)
     ///
     /// OUTPUT FORMATS:
     ///   mermaid  — Mermaid.js (render in GitHub, Obsidian, etc.)
@@ -179,18 +189,19 @@ pub(crate) enum Command {
     ///   d2       — Terrastruct D2
     ///
     /// EXAMPLES:
-    ///   sysml-cli diagram -t bdd model.sysml
-    ///   sysml-cli diagram -t ibd -s Vehicle model.sysml
-    ///   sysml-cli diagram -t stm -o plantuml model.sysml
-    ///   sysml-cli diagram -t bdd -d LR --depth 2 model.sysml
+    ///   sysml diagram -t bdd model.sysml
+    ///   sysml diagram -t ibd -s Vehicle model.sysml
+    ///   sysml diagram -t trace model.sysml
+    ///   sysml diagram -t alloc -o plantuml model.sysml
+    ///   sysml diagram -t bdd --view StructureView model.sysml
     Diagram {
         /// SysML v2 file to generate diagram from.
         #[arg(required = true)]
         file: PathBuf,
 
-        /// Diagram type: bdd, ibd, stm, act, req, pkg, par.
+        /// Diagram type.
         #[arg(short = 't', long = "type", required = true,
-              value_parser = ["bdd", "ibd", "stm", "act", "req", "pkg", "par"],
+              value_parser = ["bdd", "ibd", "stm", "act", "req", "pkg", "par", "trace", "alloc", "ucd"],
               help_heading = "Diagram")]
         diagram_type: String,
 
@@ -205,6 +216,11 @@ pub(crate) enum Command {
         /// stm/act: show this specific state machine or action.
         #[arg(short, long)]
         scope: Option<String>,
+
+        /// Apply a named SysML v2 view definition as a filter.
+        /// The view's expose and filter clauses determine which elements appear.
+        #[arg(long)]
+        view: Option<String>,
 
         /// Layout direction: TB (top-bottom), LR (left-right), BT, RL.
         #[arg(short, long)]
@@ -853,6 +869,22 @@ pub(crate) enum VerifyCommand {
         #[arg(long)]
         inside: Option<String>,
     },
+    /// Execute a verification case interactively, recording results.
+    ///
+    /// Presents each step of a verification case as a guided checklist,
+    /// captures measurements and pass/fail judgments, and writes a TOML
+    /// execution record to .sysml/records/.
+    Run {
+        /// SysML v2 files containing verification cases.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Name of the verification case to run (prompted if omitted).
+        #[arg(long)]
+        case: Option<String>,
+        /// Author name for the execution record.
+        #[arg(long, default_value = "engineer")]
+        author: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1012,6 +1044,39 @@ pub(crate) enum MfgCommand {
         /// Comma-separated measurement values.
         #[arg(long, required = true, value_delimiter = ',')]
         values: Vec<f64>,
+    },
+    /// Start a new production lot for a manufacturing routing.
+    ///
+    /// Creates a lot record with a unique ID and initializes all steps
+    /// to Pending status. The lot TOML record is written to .sysml/records/.
+    StartLot {
+        /// SysML v2 files containing the routing definition.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Name of the routing (action definition) to use.
+        #[arg(long)]
+        routing: Option<String>,
+        /// Lot quantity.
+        #[arg(long, default_value = "1")]
+        quantity: u32,
+        /// Lot type: production, prototype, first-article.
+        #[arg(long, default_value = "production", value_parser = ["production", "prototype", "first-article"])]
+        lot_type: String,
+        /// Author name for the lot record.
+        #[arg(long, default_value = "engineer")]
+        author: String,
+    },
+    /// Execute the next step of an active lot interactively.
+    ///
+    /// Prompts for parameter readings, validates against control limits,
+    /// and advances the lot. The updated lot record is written to .sysml/records/.
+    Step {
+        /// Lot ID (or prefix) to advance.
+        #[arg(required = true)]
+        lot_id: String,
+        /// Author name for the execution record.
+        #[arg(long, default_value = "engineer")]
+        author: String,
     },
 }
 

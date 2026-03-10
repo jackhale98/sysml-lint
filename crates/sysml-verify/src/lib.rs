@@ -653,6 +653,61 @@ pub fn interpret_verify_add_wizard(result: &sysml_core::interactive::WizardResul
     Some((name.to_string(), sysml))
 }
 
+/// Interpret wizard results from `build_wizard_steps()` into a `VerificationExecution`.
+///
+/// Extracts step outcomes, measurements, observations, and overall result
+/// from the wizard answers and builds a complete execution record.
+pub fn interpret_wizard_result(
+    result: &sysml_core::interactive::WizardResult,
+    vc: &VerificationCase,
+) -> VerificationExecution {
+    let mut measurements = Vec::new();
+
+    for vs in &vc.steps {
+        let step_id = format!("step_{}", vs.number);
+
+        if vs.is_measurement {
+            let value = result.get_number(&format!("{step_id}_value"))
+                .unwrap_or(0.0);
+            let unit = result.get_string(&format!("{step_id}_unit"))
+                .unwrap_or("")
+                .to_string();
+            let within_spec = result.get_bool(&format!("{step_id}_in_spec"))
+                .unwrap_or(false);
+            measurements.push(Measurement {
+                name: vs.description.clone(),
+                value,
+                unit,
+                within_spec,
+            });
+        }
+    }
+
+    let overall = result.get_string("overall_result").unwrap_or("fail");
+    let detail = result.get_string("result_detail")
+        .unwrap_or("")
+        .to_string();
+
+    let exec_result = match overall {
+        "pass" => ExecutionResult::Pass,
+        "conditional_pass" => ExecutionResult::ConditionalPass(detail.clone()),
+        "blocked" => ExecutionResult::Blocked(detail.clone()),
+        _ => ExecutionResult::Fail,
+    };
+
+    let notes = result.get_string("observations")
+        .unwrap_or("")
+        .to_string();
+
+    VerificationExecution {
+        verification_case: vc.name.clone(),
+        result: exec_result,
+        requirements_verified: vc.requirements.clone(),
+        measurements,
+        notes,
+    }
+}
+
 fn default_method_choices() -> Vec<sysml_core::interactive::ChoiceOption> {
     use sysml_core::interactive::ChoiceOption;
     vec![
@@ -1329,5 +1384,107 @@ mod tests {
         assert_eq!(name, "TestBrakes");
         assert!(sysml.contains("verify requirement BrakeReq;"));
         assert!(sysml.contains("verify requirement SafetyReq;"));
+    }
+
+    // -- interpret_wizard_result tests ----------------------------------
+
+    #[test]
+    fn interpret_wizard_result_pass() {
+        use sysml_core::interactive::*;
+        let vc = VerificationCase {
+            name: "TestBrakes".to_string(),
+            qualified_name: None,
+            requirements: vec!["BrakeReq".to_string()],
+            steps: vec![
+                VerificationStep { number: 1, description: "Apply brake".into(), is_measurement: false },
+            ],
+            acceptance_criteria: Vec::new(),
+        };
+        let mut result = WizardResult::new();
+        result.set("ready", WizardAnswer::Bool(true));
+        result.set("step_1", WizardAnswer::Bool(true));
+        result.set("observations", WizardAnswer::String("looks good".into()));
+        result.set("overall_result", WizardAnswer::String("pass".into()));
+        result.set("result_detail", WizardAnswer::String("".into()));
+
+        let exec = interpret_wizard_result(&result, &vc);
+        assert_eq!(exec.verification_case, "TestBrakes");
+        assert_eq!(exec.result, ExecutionResult::Pass);
+        assert_eq!(exec.requirements_verified, vec!["BrakeReq"]);
+        assert_eq!(exec.notes, "looks good");
+        assert!(exec.measurements.is_empty());
+    }
+
+    #[test]
+    fn interpret_wizard_result_with_measurement() {
+        use sysml_core::interactive::*;
+        let vc = VerificationCase {
+            name: "MeasureStop".to_string(),
+            qualified_name: None,
+            requirements: vec!["StopReq".to_string()],
+            steps: vec![
+                VerificationStep { number: 1, description: "Stopping distance".into(), is_measurement: true },
+            ],
+            acceptance_criteria: Vec::new(),
+        };
+        let mut result = WizardResult::new();
+        result.set("ready", WizardAnswer::Bool(true));
+        result.set("step_1_value", WizardAnswer::Number(42.5));
+        result.set("step_1_unit", WizardAnswer::String("m".into()));
+        result.set("step_1_in_spec", WizardAnswer::Bool(true));
+        result.set("observations", WizardAnswer::String("".into()));
+        result.set("overall_result", WizardAnswer::String("pass".into()));
+        result.set("result_detail", WizardAnswer::String("".into()));
+
+        let exec = interpret_wizard_result(&result, &vc);
+        assert_eq!(exec.measurements.len(), 1);
+        assert_eq!(exec.measurements[0].name, "Stopping distance");
+        assert_eq!(exec.measurements[0].value, 42.5);
+        assert_eq!(exec.measurements[0].unit, "m");
+        assert!(exec.measurements[0].within_spec);
+    }
+
+    #[test]
+    fn interpret_wizard_result_blocked() {
+        use sysml_core::interactive::*;
+        let vc = VerificationCase {
+            name: "TestX".to_string(),
+            qualified_name: None,
+            requirements: vec![],
+            steps: vec![],
+            acceptance_criteria: Vec::new(),
+        };
+        let mut result = WizardResult::new();
+        result.set("ready", WizardAnswer::Bool(true));
+        result.set("observations", WizardAnswer::String("".into()));
+        result.set("overall_result", WizardAnswer::String("blocked".into()));
+        result.set("result_detail", WizardAnswer::String("Equipment unavailable".into()));
+
+        let exec = interpret_wizard_result(&result, &vc);
+        assert_eq!(exec.result, ExecutionResult::Blocked("Equipment unavailable".into()));
+    }
+
+    #[test]
+    fn interpret_wizard_result_creates_valid_record() {
+        use sysml_core::interactive::*;
+        let vc = VerificationCase {
+            name: "TestBrakes".to_string(),
+            qualified_name: None,
+            requirements: vec!["BrakeReq".to_string()],
+            steps: vec![],
+            acceptance_criteria: Vec::new(),
+        };
+        let mut result = WizardResult::new();
+        result.set("ready", WizardAnswer::Bool(true));
+        result.set("observations", WizardAnswer::String("".into()));
+        result.set("overall_result", WizardAnswer::String("pass".into()));
+        result.set("result_detail", WizardAnswer::String("".into()));
+
+        let exec = interpret_wizard_result(&result, &vc);
+        let record = create_execution_record(&exec, "tester");
+        assert_eq!(record.meta.tool, "verify");
+        assert_eq!(record.meta.record_type, "execution");
+        assert!(record.refs.contains_key("requirements"));
+        assert!(record.refs.contains_key("verification_case"));
     }
 }
