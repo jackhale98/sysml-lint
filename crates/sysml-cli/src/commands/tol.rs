@@ -13,6 +13,7 @@ pub fn run(cli: &crate::Cli, kind: &TolCommand) -> ExitCode {
             iterations,
         } => run_analyze(cli, files, method, *iterations),
         TolCommand::Sensitivity { files } => run_sensitivity(cli, files),
+        TolCommand::Add { file, inside } => run_add(file.as_ref(), inside.as_deref()),
     }
 }
 
@@ -139,6 +140,56 @@ fn run_sensitivity(cli: &crate::Cli, files: &[PathBuf]) -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+fn run_add(file: Option<&PathBuf>, inside: Option<&str>) -> ExitCode {
+    use sysml_core::interactive::{run_wizard, WizardRunner};
+    use crate::wizard::CliWizardRunner;
+
+    let runner = CliWizardRunner::new();
+    if !runner.is_interactive() {
+        eprintln!("error: `tol add` requires an interactive terminal");
+        return ExitCode::FAILURE;
+    }
+
+    let steps = sysml_tol::build_tol_add_wizard(None);
+    let result = match run_wizard(&runner, &steps) {
+        Some(r) => r,
+        None => {
+            eprintln!("Cancelled.");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let (name, sysml_text) = match sysml_tol::interpret_tol_add_wizard(&result) {
+        Some(pair) => pair,
+        None => {
+            eprintln!("error: incomplete wizard answers");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    eprintln!("\nPreview:");
+    for line in sysml_text.lines() {
+        eprintln!("  {}", line);
+    }
+    eprintln!();
+
+    if let Some(target) = file {
+        match crate::model_writer::write_to_model(target, &sysml_text, inside) {
+            Ok(()) => {
+                eprintln!("Wrote {} to {}", name, target.display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::FAILURE
+            }
+        }
+    } else {
+        println!("{}", sysml_text);
+        ExitCode::SUCCESS
+    }
 }
 
 fn parse_files(files: &[PathBuf]) -> Option<Vec<sysml_core::model::Model>> {

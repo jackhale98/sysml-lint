@@ -15,6 +15,7 @@ pub fn run(cli: &crate::Cli, kind: &BomCommand) -> ExitCode {
         } => run_rollup(cli, files, root, *include_mass, *include_cost),
         BomCommand::WhereUsed { files, part } => run_where_used(cli, files, part),
         BomCommand::Export { files, root, format } => run_export(cli, files, root, format),
+        BomCommand::Add { file, inside } => run_add(file.as_ref(), inside.as_deref()),
     }
 }
 
@@ -122,6 +123,56 @@ fn run_export(
     }
 
     ExitCode::SUCCESS
+}
+
+fn run_add(file: Option<&PathBuf>, inside: Option<&str>) -> ExitCode {
+    use sysml_core::interactive::{run_wizard, WizardRunner};
+    use crate::wizard::CliWizardRunner;
+
+    let runner = CliWizardRunner::new();
+    if !runner.is_interactive() {
+        eprintln!("error: `bom add` requires an interactive terminal");
+        return ExitCode::FAILURE;
+    }
+
+    let steps = sysml_bom::build_bom_add_wizard(None);
+    let result = match run_wizard(&runner, &steps) {
+        Some(r) => r,
+        None => {
+            eprintln!("Cancelled.");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let (name, sysml_text) = match sysml_bom::interpret_bom_add_wizard(&result) {
+        Some(pair) => pair,
+        None => {
+            eprintln!("error: incomplete wizard answers");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    eprintln!("\nPreview:");
+    for line in sysml_text.lines() {
+        eprintln!("  {}", line);
+    }
+    eprintln!();
+
+    if let Some(target) = file {
+        match crate::model_writer::write_to_model(target, &sysml_text, inside) {
+            Ok(()) => {
+                eprintln!("Wrote {} to {}", name, target.display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::FAILURE
+            }
+        }
+    } else {
+        println!("{}", sysml_text);
+        ExitCode::SUCCESS
+    }
 }
 
 /// Merge multiple models into a single model for cross-file BOM lookups.

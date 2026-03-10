@@ -31,6 +31,15 @@ Show verification status for all requirements.
 sysml verify status model.sysml
 ```
 
+### verify add
+
+Add a verification case to a model file using an interactive wizard.
+
+```sh
+sysml verify add --file model.sysml
+sysml verify add                        # prints to stdout
+```
+
 ## risk
 
 Risk management: identification, assessment, matrix visualization, and FMEA.
@@ -61,6 +70,15 @@ Generate an FMEA (Failure Mode and Effects Analysis) worksheet.
 sysml risk fmea model.sysml
 ```
 
+### risk add
+
+Add a risk element to a model file using an interactive wizard.
+
+```sh
+sysml risk add --file model.sysml
+sysml risk add                          # prints to stdout
+```
+
 ## tol
 
 Tolerance stack-up analysis: worst-case, RSS, and Monte Carlo methods.
@@ -87,6 +105,15 @@ Rank tolerance contributors by their impact on overall variation.
 
 ```sh
 sysml tol sensitivity model.sysml
+```
+
+### tol add
+
+Add a tolerance dimension chain to a model file using an interactive wizard.
+
+```sh
+sysml tol add --file model.sysml
+sysml tol add                           # prints to stdout
 ```
 
 ## bom
@@ -136,6 +163,15 @@ sysml bom export model.sysml --root Vehicle --format csv
 |--------|-------------|
 | `--root <DEF>` | Root part definition name (required) |
 | `--format <FORMAT>` | Output format (default: `csv`) |
+
+### bom add
+
+Add a BOM part with identity, mass, and cost attributes using an interactive wizard.
+
+```sh
+sysml bom add --file model.sysml
+sysml bom add                           # prints to stdout
+```
 
 ## source
 
@@ -261,3 +297,18 @@ sysml quality trend --group-by severity model.sysml
 | Option | Description |
 |--------|-------------|
 | `--group-by <DIM>` | Grouping dimension: `category`, `severity`, `part`, `supplier` (default: `category`) |
+
+### quality create
+
+Create a quality item (NCR, CAPA, or Process Deviation) using an interactive wizard. Writes a TOML record to `.sysml/records/`.
+
+```sh
+sysml quality create                    # wizard asks which type
+sysml quality create --type ncr         # skip type selection
+sysml quality create --type capa
+sysml quality create --type deviation
+```
+
+| Option | Description |
+|--------|-------------|
+| `--type <TYPE>` | Quality item type: `ncr`, `capa`, `deviation` |
