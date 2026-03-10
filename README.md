@@ -38,13 +38,17 @@ sysml lint model.sysml                          # Validate a model
 sysml list model.sysml                          # List all elements
 sysml show model.sysml Vehicle                  # Element details
 sysml diagram -t bdd model.sysml                # Block definition diagram
+sysml diagram -t trace model.sysml              # Traceability diagram
 sysml simulate state-machine model.sysml        # Interactive state machine
 sysml fmt model.sysml                           # Format source
-sysml new part-def Vehicle --doc "A vehicle"    # Generate template
+sysml add --stdout part-def Vehicle             # Generate template to stdout
+sysml add model.sysml part-def Engine           # Insert into file
+sysml add                                       # Interactive wizard
 sysml init                                      # Initialize a project
 sysml risk matrix model.sysml                   # Risk matrix
 sysml tol analyze model.sysml --method rss      # Tolerance stack-up
 sysml bom rollup model.sysml --root Vehicle     # BOM rollup
+sysml quality create --type ncr                 # Create NCR interactively
 sysml report dashboard model.sysml              # Project health
 ```
 
@@ -72,23 +76,26 @@ sysml report dashboard model.sysml              # Project health
 | `allocation` | Logical-to-physical allocation matrix | |
 | `coverage` | Model quality and completeness report | |
 | `stats` | Aggregate model statistics | |
+| **Diagrams** | | [diagrams](docs/commands/diagrams.md) |
+| `diagram` | Generate diagrams (bdd, ibd, stm, act, req, pkg, par, trace, alloc, ucd) | |
 | **Editing** | | [editing](docs/commands/editing.md) |
-| `new` | Generate SysML v2 definition template to stdout | |
-| `edit` | CST-aware surgical file modifications (add/remove/rename) | |
+| `add` | Add elements interactively, to a file, or to stdout | |
+| `remove` | Remove an element from a SysML file | |
+| `rename` | Rename an element and update all references | |
+| `example` | Generate example projects with teaching comments | |
 | `fmt` | Format SysML v2 source files | |
-| `scaffold` | Generate elements with teaching comments and example projects | |
 | **Simulation & Export** | | [simulation](docs/commands/simulation.md) |
 | `simulate` | Evaluate constraints, state machines, action flows | |
 | `export` | Export FMI 3.0, Modelica, SSP artifacts | |
 | **Lifecycle** | | [lifecycle](docs/commands/lifecycle.md) |
-| `verify` | Verification case management and coverage | |
-| `risk` | Risk management, matrix, FMEA | |
+| `verify` | Verification case management, coverage, interactive execution | |
+| `risk` | Risk management, matrix, FMEA, interactive risk creation | |
 | `tol` | Tolerance stack-up analysis (worst-case, RSS, Monte Carlo) | |
 | `bom` | Bill of materials rollup, where-used, export | |
 | `source` | Supplier management, RFQ, approved source lists | |
-| `mfg` | Manufacturing routings and SPC | |
+| `mfg` | Manufacturing routings, SPC, lot tracking, step execution | |
 | `qc` | Quality control, sampling plans, Cp/Cpk | |
-| `quality` | Quality management (NCR, CAPA, Process Deviation) | |
+| `quality` | Quality management (NCR, CAPA, Process Deviation, RCA) | |
 | **Project** | | [project](docs/commands/project.md) |
 | `init` | Initialize a `.sysml/` project | |
 | `index` | Build or rebuild project index | |
