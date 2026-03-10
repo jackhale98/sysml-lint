@@ -46,6 +46,7 @@ fn main() -> ExitCode {
         Command::Add {
             file, kind, name, type_ref, inside, dry_run, stdout,
             teach, doc, extends, r#abstract, short_name, members,
+            connect, satisfy, verify, by,
             exposes, filter, interactive,
         } => commands::add::run(
             file.as_ref(), kind.as_deref(), name.as_deref(),
@@ -53,6 +54,8 @@ fn main() -> ExitCode {
             *teach, doc.as_deref(), extends.as_deref(), *r#abstract,
             short_name.as_deref(), members, exposes,
             filter.as_deref(), *interactive,
+            connect.as_deref(), satisfy.as_deref(), verify.as_deref(),
+            by.as_deref(),
         ),
         Command::Remove { file, name, dry_run } => {
             commands::remove::run(file, name, *dry_run)

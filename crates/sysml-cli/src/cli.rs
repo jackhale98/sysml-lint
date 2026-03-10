@@ -276,6 +276,11 @@ pub(crate) enum Command {
     ///   sysml add --stdout part-def Vehicle              (print to stdout)
     ///   sysml add model.sysml part engine -t Engine      (usage inside def)
     ///   sysml add model.sysml part-def Vehicle --doc 'A vehicle' -m 'part engine:Engine'
+    ///   sysml add model.sysml enum-def Color -m red -m green -m blue
+    ///   sysml add model.sysml part wheels -t Wheel -m 'part hub:Hub[4]'
+    ///   sysml add model.sysml connection c1 --connect 'a.x to b.y' --inside Assy
+    ///   sysml add model.sysml satisfy TempReq --by Vehicle
+    ///   sysml add model.sysml import 'Vehicles::*'
     ///   sysml add --teach --stdout part-def Vehicle      (teaching comments)
     Add {
         /// Target SysML file (omit for interactive or stdout mode).
@@ -323,9 +328,26 @@ pub(crate) enum Command {
         #[arg(long)]
         short_name: Option<String>,
 
-        /// Add members (repeatable). Format: "[direction] kind name[:type]".
+        /// Add members (repeatable). Format: "[direction] kind name[:type[mult]]".
+        /// For enum-def, just the member name: -m red -m green -m blue
         #[arg(long = "member", short = 'm')]
         members: Vec<String>,
+
+        /// Connection binding endpoints (e.g., "a.portOut to b.portIn").
+        #[arg(long)]
+        connect: Option<String>,
+
+        /// Create a satisfy relationship: --satisfy REQ_NAME --by ELEMENT.
+        #[arg(long)]
+        satisfy: Option<String>,
+
+        /// Create a verify relationship: --verify REQ_NAME --by ELEMENT.
+        #[arg(long)]
+        verify: Option<String>,
+
+        /// Target element for --satisfy or --verify.
+        #[arg(long)]
+        by: Option<String>,
 
         /// (view-def only) Expose clause.
         #[arg(long = "expose")]

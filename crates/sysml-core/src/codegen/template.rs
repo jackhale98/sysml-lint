@@ -105,29 +105,35 @@ pub fn generate_template(opts: &TemplateOptions) -> String {
             out.push_str(&format!("{}filter @type istype {};\n", inner_indent, f));
         }
 
-        // Members
+        // Members — for enum defs, render as `enum <name>;`
+        let is_enum = opts.kind == DefKind::Enum;
         for member in &opts.members {
             out.push_str(&inner_indent);
 
-            // Direction
-            if let Some(ref dir) = member.direction {
-                out.push_str(&format!("{} ", dir));
+            if is_enum {
+                // Enum members: just `enum <name>;`
+                out.push_str(&format!("enum {};\n", member.name));
+            } else {
+                // Direction
+                if let Some(ref dir) = member.direction {
+                    out.push_str(&format!("{} ", dir));
+                }
+
+                // Usage kind and name
+                out.push_str(&format!("{} {}", member.usage_kind, member.name));
+
+                // Type reference
+                if let Some(ref t) = member.type_ref {
+                    out.push_str(&format!(" : {}", t));
+                }
+
+                // Multiplicity
+                if let Some(ref m) = member.multiplicity {
+                    out.push_str(&format!(" [{}]", m));
+                }
+
+                out.push_str(";\n");
             }
-
-            // Usage kind and name
-            out.push_str(&format!("{} {}", member.usage_kind, member.name));
-
-            // Type reference
-            if let Some(ref t) = member.type_ref {
-                out.push_str(&format!(" : {}", t));
-            }
-
-            // Multiplicity
-            if let Some(ref m) = member.multiplicity {
-                out.push_str(&format!(" [{}]", m));
-            }
-
-            out.push_str(";\n");
         }
 
         out.push_str(&format!("{}}}\n", indent));
@@ -152,7 +158,13 @@ pub fn validate_generated(text: &str) -> Result<(), Vec<String>> {
     }
 }
 
-/// Parse a member spec string like "part engine:Engine" or "in port fuelIn:FuelPort".
+/// Parse a member spec string like "part engine:Engine" or "in port fuelIn:FuelPort[2]".
+///
+/// Supported formats:
+///   - `part engine:Engine`
+///   - `in port fuelIn:FuelPort`
+///   - `part wheels:Wheel[4]`
+///   - `attribute name:String[0..1]`
 pub fn parse_member_spec(s: &str) -> Option<MemberSpec> {
     let parts: Vec<&str> = s.split_whitespace().collect();
     if parts.is_empty() {
@@ -173,19 +185,85 @@ pub fn parse_member_spec(s: &str) -> Option<MemberSpec> {
     idx += 1;
 
     let name_and_type = parts.get(idx)?.to_string();
-    let (name, type_ref) = if let Some((n, t)) = name_and_type.split_once(':') {
-        (n.to_string(), Some(t.to_string()))
-    } else {
-        (name_and_type, None)
-    };
+    let (name, type_ref, multiplicity) = parse_name_type_mult(&name_and_type);
 
     Some(MemberSpec {
         usage_kind,
         name,
         type_ref,
         direction,
-        multiplicity: None,
+        multiplicity,
     })
+}
+
+/// Parse `name[:Type[mult]]` into (name, Option<type>, Option<multiplicity>).
+fn parse_name_type_mult(s: &str) -> (String, Option<String>, Option<String>) {
+    if let Some((name, rest)) = s.split_once(':') {
+        // rest could be "Type[mult]" or "Type"
+        if let Some((type_ref, mult)) = rest.split_once('[') {
+            let mult = mult.trim_end_matches(']');
+            (name.to_string(), Some(type_ref.to_string()), Some(mult.to_string()))
+        } else {
+            (name.to_string(), Some(rest.to_string()), None)
+        }
+    } else if let Some((name, mult)) = s.split_once('[') {
+        // name[mult] without type
+        let mult = mult.trim_end_matches(']');
+        (name.to_string(), None, Some(mult.to_string()))
+    } else {
+        (s.to_string(), None, None)
+    }
+}
+
+/// Generate a connection usage with connect binding.
+///
+/// Returns text like:
+/// ```text
+/// connection tempConn : SensorConnection
+///     connect tempSensor.dataOut to controller.tempIn;
+/// ```
+pub fn generate_connection_usage(
+    name: &str,
+    type_ref: Option<&str>,
+    connect_endpoints: &str,
+    indent: usize,
+) -> String {
+    let ind = " ".repeat(indent);
+    let inner = " ".repeat(indent + 4);
+    let type_part = type_ref
+        .map(|t| format!(" : {}", t))
+        .unwrap_or_default();
+    format!(
+        "{}connection {}{}\n{}connect {};\n",
+        ind, name, type_part, inner, connect_endpoints,
+    )
+}
+
+/// Generate a satisfy or verify relationship statement.
+///
+/// Returns text like:
+/// ```text
+/// satisfy requirement TemperatureAccuracy by WeatherStationUnit;
+/// ```
+pub fn generate_relationship(
+    rel_kind: &str,
+    requirement: &str,
+    by: &str,
+    indent: usize,
+) -> String {
+    let ind = " ".repeat(indent);
+    format!("{}{} requirement {} by {};\n", ind, rel_kind, requirement, by)
+}
+
+/// Generate an import statement.
+///
+/// Returns text like:
+/// ```text
+/// import WeatherStation::*;
+/// ```
+pub fn generate_import(import_path: &str, indent: usize) -> String {
+    let ind = " ".repeat(indent);
+    format!("{}import {};\n", ind, import_path)
 }
 
 #[cfg(test)]
@@ -319,11 +397,160 @@ mod tests {
         assert_eq!(m.name, "engine");
         assert_eq!(m.type_ref.as_deref(), Some("Engine"));
         assert!(m.direction.is_none());
+        assert!(m.multiplicity.is_none());
 
         let m2 = parse_member_spec("in port fuelIn:FuelPort").unwrap();
         assert_eq!(m2.direction.as_deref(), Some("in"));
         assert_eq!(m2.usage_kind, "port");
         assert_eq!(m2.name, "fuelIn");
+    }
+
+    #[test]
+    fn parse_member_spec_with_multiplicity() {
+        let m = parse_member_spec("part wheels:Wheel[4]").unwrap();
+        assert_eq!(m.name, "wheels");
+        assert_eq!(m.type_ref.as_deref(), Some("Wheel"));
+        assert_eq!(m.multiplicity.as_deref(), Some("4"));
+
+        let m2 = parse_member_spec("attribute sensors:Sensor[1..*]").unwrap();
+        assert_eq!(m2.name, "sensors");
+        assert_eq!(m2.type_ref.as_deref(), Some("Sensor"));
+        assert_eq!(m2.multiplicity.as_deref(), Some("1..*"));
+
+        let m3 = parse_member_spec("part items[0..1]").unwrap();
+        assert_eq!(m3.name, "items");
+        assert!(m3.type_ref.is_none());
+        assert_eq!(m3.multiplicity.as_deref(), Some("0..1"));
+    }
+
+    #[test]
+    fn generate_member_with_multiplicity() {
+        let opts = TemplateOptions {
+            kind: DefKind::Part,
+            name: "Vehicle".to_string(),
+            super_type: None,
+            is_abstract: false,
+            short_name: None,
+            doc: None,
+            members: vec![MemberSpec {
+                usage_kind: "part".to_string(),
+                name: "wheels".to_string(),
+                type_ref: Some("Wheel".to_string()),
+                direction: None,
+                multiplicity: Some("4".to_string()),
+            }],
+            exposes: Vec::new(),
+            filter: None,
+            indent: 0,
+        };
+        let result = generate_template(&opts);
+        assert!(result.contains("part wheels : Wheel [4];"));
+    }
+
+    #[test]
+    fn generate_enum_with_members() {
+        let opts = TemplateOptions {
+            kind: DefKind::Enum,
+            name: "Color".to_string(),
+            super_type: None,
+            is_abstract: false,
+            short_name: None,
+            doc: None,
+            members: vec![
+                MemberSpec {
+                    usage_kind: "enum".to_string(),
+                    name: "red".to_string(),
+                    type_ref: None,
+                    direction: None,
+                    multiplicity: None,
+                },
+                MemberSpec {
+                    usage_kind: "enum".to_string(),
+                    name: "green".to_string(),
+                    type_ref: None,
+                    direction: None,
+                    multiplicity: None,
+                },
+                MemberSpec {
+                    usage_kind: "enum".to_string(),
+                    name: "blue".to_string(),
+                    type_ref: None,
+                    direction: None,
+                    multiplicity: None,
+                },
+            ],
+            exposes: Vec::new(),
+            filter: None,
+            indent: 0,
+        };
+        let result = generate_template(&opts);
+        assert!(result.contains("enum def Color {"));
+        assert!(result.contains("enum red;"));
+        assert!(result.contains("enum green;"));
+        assert!(result.contains("enum blue;"));
+        // Should NOT contain usage-style formatting
+        assert!(!result.contains("enum enum"));
+    }
+
+    #[test]
+    fn generate_connection_usage_with_type() {
+        let result = generate_connection_usage(
+            "tempConn",
+            Some("SensorConnection"),
+            "tempSensor.dataOut to controller.tempIn",
+            0,
+        );
+        assert!(result.contains("connection tempConn : SensorConnection"));
+        assert!(result.contains("connect tempSensor.dataOut to controller.tempIn;"));
+    }
+
+    #[test]
+    fn generate_connection_usage_without_type() {
+        let result = generate_connection_usage(
+            "displayConn",
+            None,
+            "controller.displayOut to display.dataIn",
+            0,
+        );
+        assert!(result.contains("connection displayConn\n"));
+        assert!(result.contains("connect controller.displayOut to display.dataIn;"));
+        assert!(!result.contains(":"));
+    }
+
+    #[test]
+    fn generate_connection_usage_indented() {
+        let result = generate_connection_usage(
+            "conn1",
+            Some("C"),
+            "a.x to b.y",
+            8,
+        );
+        assert!(result.starts_with("        connection conn1 : C\n"));
+        assert!(result.contains("            connect a.x to b.y;"));
+    }
+
+    #[test]
+    fn generate_satisfy_relationship() {
+        let result = generate_relationship("satisfy", "TempAccuracy", "WeatherStation", 0);
+        assert_eq!(result, "satisfy requirement TempAccuracy by WeatherStation;\n");
+    }
+
+    #[test]
+    fn generate_verify_relationship() {
+        let result = generate_relationship("verify", "TempAccuracy", "TestTempAccuracy", 4);
+        assert_eq!(result, "    verify requirement TempAccuracy by TestTempAccuracy;\n");
+    }
+
+    #[test]
+    fn generate_import_statement() {
+        let result = generate_import("WeatherStation::*", 0);
+        assert_eq!(result, "import WeatherStation::*;\n");
+    }
+
+    #[test]
+    fn generate_import_statement_indented() {
+        let result = generate_import("Vehicles::Engine", 4);
+        assert_eq!(result, "    import Vehicles::Engine;\n");
     }
 
     #[test]
