@@ -8,22 +8,23 @@ The tool ships with SysML v2 domain libraries in the `libraries/` directory. The
 // Domain library (shipped with tool)
 package SysMLRisk {
     part def RiskDef {
-        attribute severity : SeverityLevel;
-        attribute likelihood : LikelihoodLevel;
+        attribute severity : Integer;
+        attribute occurrence : Integer;
+        attribute detection : Integer;
     }
 }
 
-// Your model
+// Your model — nest risks inside the parts they apply to
 package MyProject {
     import SysMLRisk::*;
 
-    // The tool recognizes this as a RiskDef
-    part def AvionicsRisk :> RiskDef {
-        attribute dalLevel : String;
-    }
-
-    part commFailure : AvionicsRisk {
-        attribute redefines severity = SeverityLevel::critical;
+    part def Enclosure {
+        part riskMoistureIngress : RiskDef {
+            doc /* Moisture ingress past IP seal */
+            attribute severity = 4;
+            attribute occurrence = 2;
+            attribute detection = 3;
+        }
     }
 }
 ```
@@ -70,20 +71,27 @@ Types for verification case management and execution tracking.
 
 ### SysMLRisk (`sysml-risk.sysml`)
 
-Types for risk identification, assessment, and mitigation.
+FMEA (AIAG/VDA, SAE J1739) and hazard analysis (MIL-STD-882E, ISO 14971) types.
 
 | Type | Kind | Description |
 |------|------|-------------|
-| `SeverityLevel` | enum def | `negligible`(1) through `catastrophic`(5) |
-| `LikelihoodLevel` | enum def | `improbable`(1) through `frequent`(5) |
-| `DetectabilityLevel` | enum def | `almostCertain`(1) through `almostImpossible`(5) |
+| `RiskDef` | part def | FMEA risk item: failureMode, failureEffect, failureCause, severity(1-5), occurrence(1-5), detection(1-5) |
 | `RiskCategory` | enum def | `technical`, `schedule`, `cost`, `safety`, `regulatory`, `supplyChain`, `environmental` |
 | `RiskStatus` | enum def | `identified`, `analyzing`, `mitigating`, `monitoring`, `closed`, `accepted` |
-| `RiskDef` | part def | Core risk with severity, likelihood, detectability, RPN |
 | `MitigationDef` | action def | Planned mitigation with strategy, owner, due date |
 | `MitigationStrategy` | enum def | `avoid`, `transfer`, `reduce`, `accept`, `contingency` |
 
-**RPN** (Risk Priority Number) = severity x likelihood x detectability (1-125 scale).
+**Scoring** — all three dimensions use 1–5 integer scales:
+
+| Score | Severity (S) | Occurrence (O) | Detection (D) |
+|-------|-------------|----------------|---------------|
+| 1 | Negligible | Improbable | Almost Certain |
+| 2 | Marginal | Remote | High |
+| 3 | Moderate | Occasional | Moderate |
+| 4 | Critical | Probable | Low |
+| 5 | Catastrophic | Frequent | Almost Impossible |
+
+**RPN** = S × O × D (range 1–125). Risk acceptance zones: Unacceptable / Undesirable / Review / Acceptable.
 
 ### SysMLTolerance (`sysml-tolerance.sysml`)
 

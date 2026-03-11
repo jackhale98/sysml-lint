@@ -433,6 +433,7 @@ fn model_type_options(
         "state" => Some(DefKind::State),
         "attribute" => Some(DefKind::Attribute),
         "item" => Some(DefKind::Item),
+        "connection" => Some(DefKind::Connection),
         _ => None,
     };
     match target {
@@ -442,6 +443,46 @@ fn model_type_options(
             .collect(),
         None => Vec::new(),
     }
+}
+
+/// Get requirement definition names from the model.
+fn model_requirement_options(model: &sysml_core::model::Model) -> Vec<String> {
+    use sysml_core::model::DefKind;
+    model.definitions.iter()
+        .filter(|d| d.kind == DefKind::Requirement)
+        .map(|d| d.name.clone())
+        .collect()
+}
+
+/// Get all non-requirement definition names suitable as satisfy/verify targets.
+fn model_satisfying_options(model: &sysml_core::model::Model) -> Vec<String> {
+    use sysml_core::model::DefKind;
+    model.definitions.iter()
+        .filter(|d| matches!(d.kind,
+            DefKind::Part | DefKind::Action | DefKind::Constraint |
+            DefKind::Verification | DefKind::UseCase
+        ))
+        .map(|d| d.name.clone())
+        .collect()
+}
+
+/// Get verification case names from the model.
+fn model_verification_options(model: &sysml_core::model::Model) -> Vec<String> {
+    use sysml_core::model::DefKind;
+    model.definitions.iter()
+        .filter(|d| d.kind == DefKind::Verification)
+        .map(|d| d.name.clone())
+        .collect()
+}
+
+/// Get port usages from the model grouped by parent, formatted as "parent.port".
+fn model_port_endpoints(model: &sysml_core::model::Model) -> Vec<String> {
+    model.usages.iter()
+        .filter(|u| u.kind == "port")
+        .filter_map(|u| {
+            u.parent_def.as_ref().map(|p| format!("{}.{}", p, u.name))
+        })
+        .collect()
 }
 
 /// Get definition names suitable as supertypes for a given definition kind.
@@ -554,16 +595,107 @@ fn run_wizard_with_context(
             return finish_wizard(runner, target_file, &sysml_text, &path, false);
         }
         "satisfy" | "verify" => {
-            let req_step = WizardStep::string("req_name", "Requirement name");
-            let req = match runner.run_step(&req_step) {
-                Some(WizardAnswer::String(s)) if !s.is_empty() => s,
-                _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+            // Suggest requirement names from model
+            let req = if let Some(m) = model {
+                let reqs = model_requirement_options(m);
+                if !reqs.is_empty() {
+                    let mut choices: Vec<ChoiceOption> = Vec::new();
+                    for r in &reqs {
+                        choices.push(ChoiceOption { value: r.clone(), label: r.clone(), description: None });
+                    }
+                    choices.push(ChoiceOption {
+                        value: "__custom__".into(), label: "(other)".into(),
+                        description: Some("Enter name manually".into()),
+                    });
+                    let step = WizardStep {
+                        id: "req_name".into(),
+                        prompt: "Which requirement?".into(),
+                        explanation: None,
+                        kind: PromptKind::Choice(choices),
+                        required: true,
+                        default: None,
+                    };
+                    match runner.run_step(&step) {
+                        Some(WizardAnswer::String(s)) if s == "__custom__" => {
+                            let custom = WizardStep::string("req_custom", "Requirement name");
+                            match runner.run_step(&custom) {
+                                Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                                _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                            }
+                        }
+                        Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                        _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                    }
+                } else {
+                    let step = WizardStep::string("req_name", "Requirement name");
+                    match runner.run_step(&step) {
+                        Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                        _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                    }
+                }
+            } else {
+                let step = WizardStep::string("req_name", "Requirement name");
+                match runner.run_step(&step) {
+                    Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                    _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                }
             };
-            let by_step = WizardStep::string("by_element", "Satisfied/verified by which element?");
-            let by = match runner.run_step(&by_step) {
-                Some(WizardAnswer::String(s)) if !s.is_empty() => s,
-                _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+
+            // Suggest target elements from model
+            let by = if let Some(m) = model {
+                let targets = if kind == "verify" {
+                    model_verification_options(m)
+                } else {
+                    model_satisfying_options(m)
+                };
+                if !targets.is_empty() {
+                    let mut choices: Vec<ChoiceOption> = Vec::new();
+                    for t in &targets {
+                        choices.push(ChoiceOption { value: t.clone(), label: t.clone(), description: None });
+                    }
+                    choices.push(ChoiceOption {
+                        value: "__custom__".into(), label: "(other)".into(),
+                        description: Some("Enter name manually".into()),
+                    });
+                    let prompt = if kind == "verify" {
+                        "Verified by which verification case?"
+                    } else {
+                        "Satisfied by which element?"
+                    };
+                    let step = WizardStep {
+                        id: "by_element".into(),
+                        prompt: prompt.into(),
+                        explanation: None,
+                        kind: PromptKind::Choice(choices),
+                        required: true,
+                        default: None,
+                    };
+                    match runner.run_step(&step) {
+                        Some(WizardAnswer::String(s)) if s == "__custom__" => {
+                            let custom = WizardStep::string("by_custom", "Element name");
+                            match runner.run_step(&custom) {
+                                Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                                _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                            }
+                        }
+                        Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                        _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                    }
+                } else {
+                    let step = WizardStep::string("by_element", "Satisfied/verified by which element?");
+                    match runner.run_step(&step) {
+                        Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                        _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                    }
+                }
+            } else {
+                let step = WizardStep::string("by_element", "Satisfied/verified by which element?");
+                match runner.run_step(&step) {
+                    Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                    _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                }
             };
+
             let sysml_text = template::generate_relationship(&kind, &req, &by, 0);
             return finish_wizard(runner, target_file, &sysml_text, &req, false);
         }
@@ -573,17 +705,74 @@ fn run_wizard_with_context(
                 Some(WizardAnswer::String(s)) if !s.is_empty() => s,
                 _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
             };
-            let type_step = WizardStep::string("conn_type", "Connection type? (Enter to skip)").optional();
-            let conn_type = match runner.run_step(&type_step) {
-                Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
-                _ => None,
+
+            // Suggest connection types from model
+            let conn_type = if let Some(m) = model {
+                let conn_defs = model_type_options(m, "connection");
+                if !conn_defs.is_empty() {
+                    let mut choices: Vec<ChoiceOption> = vec![
+                        ChoiceOption { value: "".into(), label: "(none)".into(), description: None },
+                    ];
+                    for cd in &conn_defs {
+                        choices.push(ChoiceOption { value: cd.clone(), label: cd.clone(), description: None });
+                    }
+                    choices.push(ChoiceOption {
+                        value: "__custom__".into(), label: "(other)".into(),
+                        description: Some("Enter type manually".into()),
+                    });
+                    let step = WizardStep {
+                        id: "conn_type".into(),
+                        prompt: "Connection type?".into(),
+                        explanation: None,
+                        kind: PromptKind::Choice(choices),
+                        required: false,
+                        default: None,
+                    };
+                    match runner.run_step(&step) {
+                        Some(WizardAnswer::String(s)) if s == "__custom__" => {
+                            let custom = WizardStep::string("conn_type_custom", "Type name");
+                            match runner.run_step(&custom) {
+                                Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                                _ => None,
+                            }
+                        }
+                        Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                        _ => None,
+                    }
+                } else {
+                    let step = WizardStep::string("conn_type", "Connection type? (Enter to skip)").optional();
+                    match runner.run_step(&step) {
+                        Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                        _ => None,
+                    }
+                }
+            } else {
+                let step = WizardStep::string("conn_type", "Connection type? (Enter to skip)").optional();
+                match runner.run_step(&step) {
+                    Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
+                    _ => None,
+                }
             };
-            let endpoints_step = WizardStep::string("endpoints", "Connect endpoints (e.g., a.portOut to b.portIn)")
-                .with_explanation("e.g. a.portOut to b.portIn");
-            let endpoints = match runner.run_step(&endpoints_step) {
-                Some(WizardAnswer::String(s)) if !s.is_empty() => s,
-                _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+
+            // Show available port endpoints
+            let endpoints = if let Some(m) = model {
+                let ports = model_port_endpoints(m);
+                if !ports.is_empty() {
+                    eprintln!("Available ports: {}", ports.join(", "));
+                }
+                let step = WizardStep::string("endpoints", "Connect endpoints (e.g., a.portOut to b.portIn)");
+                match runner.run_step(&step) {
+                    Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                    _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                }
+            } else {
+                let step = WizardStep::string("endpoints", "Connect endpoints (e.g., a.portOut to b.portIn)");
+                match runner.run_step(&step) {
+                    Some(WizardAnswer::String(s)) if !s.is_empty() => s,
+                    _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
+                }
             };
+
             let sysml_text = template::generate_connection_usage(
                 &name, conn_type.as_deref(), &endpoints, 0);
             return finish_wizard(runner, target_file, &sysml_text, &name, true);

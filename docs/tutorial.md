@@ -373,22 +373,35 @@ sysml add verification.sysml import "WeatherStationRequirements::*"
 
 ### 4.2 Add verification cases
 
+A verification case defines *what* to verify and the *procedure* to follow. Sub-usages inside the verification def become procedure steps — `sysml verify run` walks through them interactively. Steps with names containing "measure" or "reading" (or typed as attributes) prompt for numeric values; other steps prompt for pass/fail confirmation.
+
 ```sh
 sysml add verification.sysml verification-def TestTemperatureAccuracy \
     --doc "Verify temperature sensor accuracy against reference thermometer" \
     -m "subject testSubject" \
-    -m "requirement tempReq:TemperatureAccuracy"
+    -m "requirement tempReq:TemperatureAccuracy" \
+    -m "action setup" \
+    -m "attribute measureAccuracy" \
+    -m "action evaluate"
 
 sysml add verification.sysml verification-def TestOperatingRange \
     --doc "Environmental chamber test across full temperature range" \
     -m "subject testSubject" \
-    -m "requirement rangeReq:OperatingRange"
+    -m "requirement rangeReq:OperatingRange" \
+    -m "action configChamber" \
+    -m "action runCycle" \
+    -m "action checkFunction"
 
 sysml add verification.sysml verification-def TestBatteryLife \
     --doc "Continuous operation test without solar input" \
     -m "subject testSubject" \
-    -m "requirement batteryReq:BatteryLife"
+    -m "requirement batteryReq:BatteryLife" \
+    -m "action disableSolar" \
+    -m "action runUntilDepleted" \
+    -m "attribute measureRuntime"
 ```
+
+> Steps are just usages inside the verification def. Use `action` for pass/fail steps and `attribute` (or names with "measure"/"reading") for measurement steps that collect numeric data.
 
 Link verification to requirements:
 
@@ -403,9 +416,9 @@ sysml add verification.sysml verify BatteryLife --by TestBatteryLife
 ```sh
 $ sysml verify list verification.sysml
 Verification Cases:
-  TestTemperatureAccuracy    verifies: TemperatureAccuracy    method: test
-  TestOperatingRange         verifies: OperatingRange         method: test
-  TestBatteryLife            verifies: BatteryLife            method: test
+  TestTemperatureAccuracy    verifies: TemperatureAccuracy    steps: 3
+  TestOperatingRange         verifies: OperatingRange         steps: 3
+  TestBatteryLife            verifies: BatteryLife            steps: 3
 
 $ sysml verify status verification.sysml requirements.sysml
 Requirement              Status       Verified By
@@ -421,19 +434,25 @@ Coverage: 3/5 have verification cases (60%)
 
 ### 4.4 Execute a verification case
 
+`verify run` reads the procedure steps from the verification def and walks through them interactively:
+
 ```sh
 $ sysml verify run verification.sysml --case TestTemperatureAccuracy --author "Jane Smith"
 Verification Case: TestTemperatureAccuracy
   Verifies: TemperatureAccuracy
   Steps: 3
 
-? Step 1 - Setup: Reference thermometer calibrated? [Y/n] Y
-? Step 2 - Execute: Measured accuracy (C): 0.3
-? Step 3 - Evaluate: Within +/- 0.5C? [Y/n] Y
+? Step 1 - setup: Completed? [Y/n] Y
+? Step 2 - measureAccuracy: Enter measured value: 0.3
+? Unit for 'measureAccuracy': C
+? Is the measurement for 'measureAccuracy' within specification? [Y/n] Y
+? Step 3 - evaluate: Completed? [Y/n] Y
+? Any observations or notes?
+? Overall verification result: > Pass
 
 Result: PASS
 Measurements:
-  accuracy = 0.3 C [OK]
+  measureAccuracy = 0.3 C [OK]
 
 Record written: .sysml/records/verify-execution-20260310-JaneSmith-ab12.toml
 ```
@@ -598,56 +617,111 @@ sysml diff model.sysml model-v2.sysml                # Semantic diff
 
 ## Part 8: Risk Management
 
-### 8.1 Create risks interactively
+Risk management follows FMEA (AIAG/VDA, SAE J1739) and hazard analysis (MIL-STD-882E, ISO 14971) methodology. Risks are nested inside the part, action, or use case they apply to — this assignment is automatically tracked in reports.
+
+### 8.1 Define risks in the model
+
+Risks use numeric 1–5 scores for Severity (S), Occurrence (O), and Detection (D):
+
+| Score | Severity     | Occurrence   | Detection          |
+|-------|-------------|-------------|--------------------|
+| 1     | Negligible  | Improbable  | Almost Certain     |
+| 2     | Marginal    | Remote      | High               |
+| 3     | Moderate    | Occasional  | Moderate           |
+| 4     | Critical    | Probable    | Low                |
+| 5     | Catastrophic| Frequent    | Almost Impossible  |
+
+### 8.2 Create risks interactively
+
+The wizard prompts for FMEA fields (failure mode, effect, cause) and numeric scores:
 
 ```sh
-$ sysml risk add
-? Risk title: Moisture ingress
-? Severity: > critical
-? Likelihood: > remote
-? Detectability: > moderate
-? Category: > safety
+$ sysml risk add --file model.sysml --inside Enclosure
+? Failure mode: Moisture ingress past IP seal
+? Failure effect: Corrosion of internal electronics
+? Failure cause: Seal degradation from UV exposure
+? Severity (1-5): 4
+? Occurrence (1-5): 2
+? Detection (1-5): 3
+? Recommended action: Add redundant seal + UV-resistant gasket
 
 Preview:
   part riskMoistureIngress : RiskDef {
-      doc /* Moisture ingress */
-      attribute redefines severity = SeverityLevel::critical;
-      attribute redefines likelihood = LikelihoodLevel::remote;
-      attribute redefines detectability = DetectabilityLevel::moderate;
+      doc /* Moisture ingress past IP seal */
+      attribute severity = 4;
+      attribute occurrence = 2;
+      attribute detection = 3;
+      attribute failureEffect = "Corrosion of internal electronics";
+      attribute failureCause = "Seal degradation from UV exposure";
+      attribute recommendedAction = "Add redundant seal + UV-resistant gasket";
   }
-  RPN: 60 (4 x 2 x 3)
+  RPN: 24 (4 × 2 × 3)  Risk: Undesirable
 
-? Write to risks.sysml? [Y/n]
+? Select target file > model.sysml
+? Insert inside which definition? > Enclosure
+Wrote riskMoistureIngress to model.sysml
 ```
 
-Or with flags:
+Add a second risk to a different component:
 
 ```sh
-sysml add --stdout package WeatherStationRisks --doc "Risk register" > risks.sysml
-sysml add risks.sysml import "WeatherStation::*"
-sysml risk add --file risks.sysml
+$ sysml risk add --file model.sysml --inside SolarPanel
+? Failure mode: Solar cell delamination
+? Failure effect: Power output degradation
+? Failure cause: Thermal cycling stress
+? Severity (1-5): 3
+? Occurrence (1-5): 3
+? Detection (1-5): 4
+? Recommended action:
 ```
 
-### 8.2 Analyze risks
+### 8.3 Analyze risks
+
+Risk reports show entity assignments and acceptance levels:
 
 ```sh
-$ sysml risk list risks.sysml
+$ sysml risk list model.sysml
 Risks (2):
-  riskMoistureIngress  [S:Critical L:Remote RPN:60]
-  riskSolarFailure     [S:Moderate L:Occasional RPN:36]
+  Moisture ingress past IP seal [S:4 O:2 RPN:24 UNDESIRABLE] → Enclosure
+  Solar cell delamination [S:3 O:3 RPN:36 UNDESIRABLE] → SolarPanel
 
-$ sysml risk matrix risks.sysml
-              Improbable  Remote     Occasional  Probable  Frequent
-Negligible         -         -           -          -         -
-Marginal           -         -           -          -         -
-Moderate           -         -    riskSolarFail     -         -
-Critical           -    riskMoisture    -          -         -
-Catastrophic       -         -           -          -         -
+$ sysml risk matrix model.sysml
+                  | Improb. | Remote  | Occasnl | Probabl | Frequnt |
+------------------+---------+---------+---------+---------+---------+
+Catastroph        |    -    |    -    |  !! -   |  !! -   |  !! -   |
+Critical          |    -    | ! risk..|  !! -   |  !! -   |  !! -   |
+Moderate          |    -    |    -    | ! risk..|    -    |    -    |
+Marginal          |    -    |    -    |    -    |    -    |    -    |
+Negligible        |    -    |    -    |    -    |    -    |    -    |
 
-$ sysml risk fmea risks.sysml
-Failure Mode              S    L    D  RPN Mitigation     Status
-riskMoistureIngress      4    2    3   60 -              open
-riskSolarFailure         3    3    4   36 -              open
+Zones: !! = Unacceptable  ! = Undesirable  ? = Review    (blank) = Acceptable
+```
+
+FMEA worksheet with full standard columns:
+
+```sh
+$ sysml risk fmea model.sysml
+Item                 Failure Mode         Effect          Cause            S   O   D   RPN Risk Level     Rec. Action          Status     Assigned To
+---------------------------------------------------------------------
+Enclosure            Moisture ingress...  Corrosion...    Seal degrada...  4   2   3    24 UNDESIRABLE    Add redundant...     Identified Enclosure
+SolarPanel           Solar cell delam...  Power output..  Thermal cycl...  3   3   4    36 UNDESIRABLE    -                    Identified SolarPanel
+```
+
+### 8.4 Risk coverage
+
+Check which parts and actions have risks identified — useful as a CI gate:
+
+```sh
+$ sysml risk coverage model.sysml
+Risk Coverage
+  Elements (parts/actions/use cases): 5
+  With risks:    2 (40.0%)
+  Without risks: 3
+
+Uncovered elements:
+  WeatherStation (part)
+  MainBoard (part)
+  DataProcessor (action)
 ```
 
 ## Part 9: Manufacturing and Quality
@@ -661,25 +735,49 @@ $ sysml mfg spc --parameter SensorCalibration \
   All points within control limits
 ```
 
-### 9.2 Production lot tracking
+### 9.2 Define a manufacturing routing
+
+A manufacturing routing is an `action def` whose child `action` usages become process steps. `sysml mfg` extracts these steps and infers the process type from each step name (e.g., "machineHousing" → Machining, "inspectDimensions" → Test & Inspection, "assembleUnit" → Assembly).
+
+```sh
+sysml add model.sysml action-def AssemblyProcess \
+    --doc "Enclosure production routing" \
+    -m "action cutSheet" \
+    -m "action machineHousing" \
+    -m "action heatTreatFrame" \
+    -m "action coatSurface" \
+    -m "action assembleUnit" \
+    -m "action inspectDimensions" \
+    -m "action packageShip"
+```
+
+This creates a routing with 7 steps. `mfg list` shows the extracted routing:
+
+```sh
+$ sysml mfg list model.sysml
+Manufacturing Routings (1):
+  AssemblyProcess (7 steps)
+```
+
+> **Step naming convention:** The process type is inferred from keywords in the step name — `cut`/`shear` → Sheet Metal, `machine`/`mill`/`drill` → Machining, `weld` → Welding, `heat`/`anneal` → Heat Treat, `coat`/`paint` → Coating, `assembl`/`install` → Assembly, `test`/`inspect` → Test & Inspection, `package`/`ship` → Packaging. Steps typed as Test & Inspection or Calibration automatically require inspection sign-off.
+
+### 9.3 Run a production lot
 
 ```sh
 $ sysml mfg start-lot model.sysml --routing AssemblyProcess --quantity 100
 Lot: mfg-lot-20260310-engineer-5a7b
   Routing:  AssemblyProcess
   Quantity: 100
-  Progress: 0/5 steps
+  Progress: 0/7 steps
 Record written: .sysml/records/mfg-lot-20260310-engineer-5a7b.toml
 
 $ sysml mfg step
-Lot: mfg-lot-20260310-engineer-5a7b — Step 1/5: Inspection
-? Resistance reading: 4.7
-? Insulation reading: 1500.0
-Readings: Resistance = 4.7 [OK], Insulation = 1500.0 [OK]
+Lot: mfg-lot-20260310-engineer-5a7b — Step 1/7: cutSheet [SheetMetal]
+? Step 1: cutSheet [SheetMetal] — Ready to begin? [Y/n] Y
 Step status: Passed
 ```
 
-### 9.3 Quality management
+### 9.4 Quality management
 
 ```sh
 # Sampling plans

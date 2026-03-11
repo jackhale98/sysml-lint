@@ -44,7 +44,7 @@ sysml list -f json model.sysml               # JSON output
 
 | Option | Description |
 |--------|-------------|
-| `-k, --kind <KIND>` | Filter: `parts`, `ports`, `actions`, `states`, `requirements`, `constraints`, `all`, `definitions`, `usages` |
+| `-k, --kind <KIND>` | Filter by kind. `parts` shows both defs and usages. `part-def` / `part-usage` restricts to one. Also: `ports`, `actions`, `states`, `requirements`, `constraints`, `connections`, `attributes`, `items`, `enums`, `all`, `definitions`, `usages` |
 | `-n, --name <PATTERN>` | Substring name filter |
 | `-p, --parent <NAME>` | Filter by parent definition |
 | `--unused` | Show only unreferenced definitions |

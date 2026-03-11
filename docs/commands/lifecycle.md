@@ -57,11 +57,13 @@ sysml verify run model.sysml --author "Jane Smith"
 
 ## risk
 
-Risk management: identification, assessment, matrix visualization, and FMEA.
+Hazard analysis (MIL-STD-882E / ISO 14971) and FMEA (AIAG/VDA, SAE J1739).
+
+Risks are part definitions specializing `RiskDef`, nested inside the part, action, or use case they apply to. Scores use 1–5 integer scales for Severity, Occurrence, and Detection.
 
 ### risk list
 
-List risks found in model files (parts specializing `RiskDef`).
+List risks with S/O/D scores, RPN, acceptance level, and entity assignment.
 
 ```sh
 sysml risk list model.sysml
@@ -70,28 +72,38 @@ sysml risk list -f json model.sysml
 
 ### risk matrix
 
-Generate a 5x5 risk matrix (severity vs. likelihood) from risks in the model.
+Generate a 5×5 risk matrix (severity vs. occurrence) with acceptance zones.
 
 ```sh
 sysml risk matrix model.sysml
-sysml risk matrix -f json model.sysml
 ```
+
+Zones: `!!` = Unacceptable, `!` = Undesirable, `?` = Review, blank = Acceptable.
 
 ### risk fmea
 
-Generate an FMEA (Failure Mode and Effects Analysis) worksheet.
+Generate an FMEA worksheet with standard columns: Item, Failure Mode, Effect, Cause, S, O, D, RPN, Risk Level, Recommended Action, Status, Assigned To.
 
 ```sh
 sysml risk fmea model.sysml
+sysml risk fmea -f json model.sysml
+```
+
+### risk coverage
+
+Show which parts, actions, and use cases have risks assigned vs. uncovered.
+
+```sh
+sysml risk coverage model.sysml
 ```
 
 ### risk add
 
-Add a risk element to a model file using an interactive wizard.
+Add a risk using an interactive FMEA wizard (failure mode, effect, cause, S/O/D scores). Prompts for target file and parent definition if not specified.
 
 ```sh
-sysml risk add --file model.sysml
-sysml risk add                          # prints to stdout
+sysml risk add
+sysml risk add --file model.sysml --inside Enclosure
 ```
 
 ## tol

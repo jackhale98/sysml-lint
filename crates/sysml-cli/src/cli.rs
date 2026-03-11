@@ -90,8 +90,8 @@ pub(crate) enum Command {
         files: Vec<PathBuf>,
 
         /// Filter by element kind.
-        /// Definitions: parts, ports, actions, states, requirements, constraints, etc.
-        /// Usages: use the singular form (part, port, action, etc.)
+        /// parts, ports, actions, states, requirements, constraints, etc. show both defs and usages.
+        /// Append -def or -usage to restrict (e.g., part-def, action-usage).
         /// Special: all, definitions, usages
         #[arg(short, long)]
         kind: Option<String>,
@@ -939,7 +939,7 @@ pub(crate) enum RiskCommand {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
-    /// Generate a risk matrix from model risks.
+    /// Generate a risk matrix with acceptance zones.
     Matrix {
         /// SysML v2 files to analyze.
         #[arg(required = true)]
@@ -947,6 +947,12 @@ pub(crate) enum RiskCommand {
     },
     /// Generate an FMEA worksheet from model risks.
     Fmea {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// Show risk coverage: parts, actions, and use cases without assigned risks.
+    Coverage {
         /// SysML v2 files to analyze.
         #[arg(required = true)]
         files: Vec<PathBuf>,

@@ -1,41 +1,19 @@
 package SysMLRisk {
     doc /*
      * Domain library for risk management.
-     * Provides reusable definitions for identifying, assessing, and
-     * mitigating risks across systems engineering programs.
+     *
+     * Implements hazard analysis (MIL-STD-882E / ISO 14971) and
+     * FMEA (AIAG/VDA, SAE J1739, IEC 60812) methodology.
+     *
+     * Scoring uses 1-5 integer scales:
+     *   Severity:   1=Negligible  2=Marginal  3=Moderate  4=Critical  5=Catastrophic
+     *   Occurrence: 1=Improbable  2=Remote    3=Occasional 4=Probable  5=Frequent
+     *   Detection:  1=Almost Certain  2=High  3=Moderate  4=Low  5=Almost Impossible
+     *
+     * RPN = Severity x Occurrence x Detection (range 1-125).
      */
 
     private import ScalarValues::*;
-
-    enum def SeverityLevel {
-        doc /* Classifies the impact magnitude of a realized risk event. */
-        enum negligible;
-        enum marginal;
-        enum moderate;
-        enum critical;
-        enum catastrophic;
-    }
-
-    enum def LikelihoodLevel {
-        doc /* Qualitative probability that a risk event will occur. */
-        enum improbable;
-        enum remote;
-        enum occasional;
-        enum probable;
-        enum frequent;
-    }
-
-    enum def DetectabilityLevel {
-        doc /*
-         * Ability to detect the risk or its precursors before impact.
-         * Ordered from easiest to hardest to detect.
-         */
-        enum almostCertain;
-        enum high;
-        enum moderate;
-        enum low;
-        enum almostImpossible;
-    }
 
     enum def RiskCategory {
         doc /* Domain classification for a risk item. */
@@ -69,19 +47,23 @@ package SysMLRisk {
 
     part def RiskDef {
         doc /*
-         * A risk item tracked in the project risk register.
-         * Combines identification metadata with qualitative
-         * severity, likelihood, and detectability assessments.
+         * A risk/hazard item tracked in the project risk register.
+         *
+         * Follows FMEA structure: each risk captures the failure mode,
+         * its effect, its cause, current controls, and S/O/D scores.
+         * Nest inside the part, action, or use case it applies to.
          */
-        attribute id : String;
-        attribute title : String;
+        attribute failureMode : String;
+        attribute failureEffect : String;
+        attribute failureCause : String;
+        attribute currentControls : String;
+        attribute severity : Integer;
+        attribute occurrence : Integer;
+        attribute detection : Integer;
         attribute category : RiskCategory;
         attribute status : RiskStatus;
-        attribute severity : SeverityLevel;
-        attribute likelihood : LikelihoodLevel;
-        attribute detectability : DetectabilityLevel;
         attribute owner : String;
-        attribute identifiedDate : String;
+        attribute recommendedAction : String;
     }
 
     action def MitigationDef {

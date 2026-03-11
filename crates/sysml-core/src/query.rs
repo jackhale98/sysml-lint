@@ -80,10 +80,12 @@ pub enum KindFilter {
     Definitions,
     /// All usages.
     Usages,
-    /// Specific definition kind.
+    /// Specific definition kind only.
     DefKind(DefKind),
     /// Specific usage kind string (e.g., "part", "port").
     UsageKind(String),
+    /// Both definitions and usages of a given kind (e.g., `parts` shows part defs + part usages).
+    Both(DefKind, String),
     /// Everything.
     All,
 }
@@ -111,13 +113,13 @@ pub fn list_elements<'a>(model: &'a Model, filter: &ListFilter) -> Vec<Element<'
 
     let include_defs = match &filter.kind {
         None | Some(KindFilter::All) | Some(KindFilter::Definitions) => true,
-        Some(KindFilter::DefKind(_)) => true,
+        Some(KindFilter::DefKind(_)) | Some(KindFilter::Both(_, _)) => true,
         Some(KindFilter::UsageKind(_)) | Some(KindFilter::Usages) => false,
     };
 
     let include_usages = match &filter.kind {
         None | Some(KindFilter::All) | Some(KindFilter::Usages) => true,
-        Some(KindFilter::UsageKind(_)) => true,
+        Some(KindFilter::UsageKind(_)) | Some(KindFilter::Both(_, _)) => true,
         Some(KindFilter::DefKind(_)) | Some(KindFilter::Definitions) => false,
     };
 
@@ -129,10 +131,13 @@ pub fn list_elements<'a>(model: &'a Model, filter: &ListFilter) -> Vec<Element<'
 
     if include_defs {
         for def in &model.definitions {
-            if let Some(KindFilter::DefKind(k)) = &filter.kind {
-                if def.kind != *k {
-                    continue;
+            match &filter.kind {
+                Some(KindFilter::DefKind(k)) | Some(KindFilter::Both(k, _)) => {
+                    if def.kind != *k {
+                        continue;
+                    }
                 }
+                _ => {}
             }
             if let Some(pat) = &filter.name_pattern {
                 if !def.name.contains(pat.as_str()) {
@@ -163,10 +168,13 @@ pub fn list_elements<'a>(model: &'a Model, filter: &ListFilter) -> Vec<Element<'
 
     if include_usages {
         for usage in &model.usages {
-            if let Some(KindFilter::UsageKind(ref k)) = filter.kind {
-                if usage.kind != *k {
-                    continue;
+            match &filter.kind {
+                Some(KindFilter::UsageKind(k)) | Some(KindFilter::Both(_, k)) => {
+                    if usage.kind != *k {
+                        continue;
+                    }
                 }
+                _ => {}
             }
             if let Some(pat) = &filter.name_pattern {
                 if !usage.name.contains(pat.as_str()) {
@@ -214,38 +222,62 @@ pub fn filter_from_view(model: &Model, view_name: &str) -> Option<ListFilter> {
 }
 
 /// Parse a kind string into a `KindFilter` (reusable helper).
+///
+/// - `parts`, `part` — both part definitions and part usages
+/// - `part-def` — only part definitions
+/// - `part-usage` — only part usages
+/// - `definitions`/`defs` — all definitions
+/// - `usages` — all usages
 pub fn parse_kind_filter(s: &str) -> Option<KindFilter> {
     match s.to_lowercase().as_str() {
         "all" => Some(KindFilter::All),
         "definitions" | "defs" => Some(KindFilter::Definitions),
         "usages" => Some(KindFilter::Usages),
-        // Definition kinds (plural form)
-        "parts" => Some(KindFilter::DefKind(DefKind::Part)),
-        "ports" => Some(KindFilter::DefKind(DefKind::Port)),
-        "actions" => Some(KindFilter::DefKind(DefKind::Action)),
-        "states" => Some(KindFilter::DefKind(DefKind::State)),
-        "requirements" => Some(KindFilter::DefKind(DefKind::Requirement)),
-        "constraints" => Some(KindFilter::DefKind(DefKind::Constraint)),
-        "connections" => Some(KindFilter::DefKind(DefKind::Connection)),
-        "interfaces" => Some(KindFilter::DefKind(DefKind::Interface)),
-        "flows" => Some(KindFilter::DefKind(DefKind::Flow)),
-        "calculations" | "calcs" => Some(KindFilter::DefKind(DefKind::Calc)),
-        "views" => Some(KindFilter::DefKind(DefKind::View)),
-        "viewpoints" => Some(KindFilter::DefKind(DefKind::Viewpoint)),
-        "enums" => Some(KindFilter::DefKind(DefKind::Enum)),
-        "packages" => Some(KindFilter::DefKind(DefKind::Package)),
-        "attributes" | "attrs" => Some(KindFilter::DefKind(DefKind::Attribute)),
-        "items" => Some(KindFilter::DefKind(DefKind::Item)),
-        // Usage kinds (singular form)
-        "part" => Some(KindFilter::UsageKind("part".to_string())),
-        "port" => Some(KindFilter::UsageKind("port".to_string())),
-        "action" => Some(KindFilter::UsageKind("action".to_string())),
-        "state" => Some(KindFilter::UsageKind("state".to_string())),
-        "requirement" => Some(KindFilter::UsageKind("requirement".to_string())),
-        "constraint" => Some(KindFilter::UsageKind("constraint".to_string())),
-        "attribute" | "attr" => Some(KindFilter::UsageKind("attribute".to_string())),
-        "item" => Some(KindFilter::UsageKind("item".to_string())),
-        "connection" => Some(KindFilter::UsageKind("connection".to_string())),
+
+        // Both defs and usages of a kind
+        "parts" | "part" => Some(KindFilter::Both(DefKind::Part, "part".to_string())),
+        "ports" | "port" => Some(KindFilter::Both(DefKind::Port, "port".to_string())),
+        "actions" | "action" => Some(KindFilter::Both(DefKind::Action, "action".to_string())),
+        "states" | "state" => Some(KindFilter::Both(DefKind::State, "state".to_string())),
+        "requirements" | "requirement" => Some(KindFilter::Both(DefKind::Requirement, "requirement".to_string())),
+        "constraints" | "constraint" => Some(KindFilter::Both(DefKind::Constraint, "constraint".to_string())),
+        "connections" | "connection" => Some(KindFilter::Both(DefKind::Connection, "connection".to_string())),
+        "interfaces" | "interface" => Some(KindFilter::Both(DefKind::Interface, "interface".to_string())),
+        "flows" | "flow" => Some(KindFilter::Both(DefKind::Flow, "flow".to_string())),
+        "calculations" | "calcs" | "calc" => Some(KindFilter::Both(DefKind::Calc, "calc".to_string())),
+        "views" | "view" => Some(KindFilter::Both(DefKind::View, "view".to_string())),
+        "viewpoints" | "viewpoint" => Some(KindFilter::Both(DefKind::Viewpoint, "viewpoint".to_string())),
+        "enums" | "enum" => Some(KindFilter::Both(DefKind::Enum, "enum".to_string())),
+        "packages" | "package" => Some(KindFilter::DefKind(DefKind::Package)),
+        "attributes" | "attrs" | "attribute" | "attr" => Some(KindFilter::Both(DefKind::Attribute, "attribute".to_string())),
+        "items" | "item" => Some(KindFilter::Both(DefKind::Item, "item".to_string())),
+
+        // Definition-only filters (suffix -def)
+        "part-def" => Some(KindFilter::DefKind(DefKind::Part)),
+        "port-def" => Some(KindFilter::DefKind(DefKind::Port)),
+        "action-def" => Some(KindFilter::DefKind(DefKind::Action)),
+        "state-def" => Some(KindFilter::DefKind(DefKind::State)),
+        "requirement-def" => Some(KindFilter::DefKind(DefKind::Requirement)),
+        "constraint-def" => Some(KindFilter::DefKind(DefKind::Constraint)),
+        "connection-def" => Some(KindFilter::DefKind(DefKind::Connection)),
+        "interface-def" => Some(KindFilter::DefKind(DefKind::Interface)),
+        "flow-def" => Some(KindFilter::DefKind(DefKind::Flow)),
+        "calc-def" => Some(KindFilter::DefKind(DefKind::Calc)),
+        "view-def" => Some(KindFilter::DefKind(DefKind::View)),
+        "viewpoint-def" => Some(KindFilter::DefKind(DefKind::Viewpoint)),
+        "enum-def" => Some(KindFilter::DefKind(DefKind::Enum)),
+        "attribute-def" | "attr-def" => Some(KindFilter::DefKind(DefKind::Attribute)),
+        "item-def" => Some(KindFilter::DefKind(DefKind::Item)),
+
+        // Usage-only filters (suffix -usage)
+        "part-usage" => Some(KindFilter::UsageKind("part".to_string())),
+        "port-usage" => Some(KindFilter::UsageKind("port".to_string())),
+        "action-usage" => Some(KindFilter::UsageKind("action".to_string())),
+        "state-usage" => Some(KindFilter::UsageKind("state".to_string())),
+        "attribute-usage" | "attr-usage" => Some(KindFilter::UsageKind("attribute".to_string())),
+        "item-usage" => Some(KindFilter::UsageKind("item".to_string())),
+        "connection-usage" => Some(KindFilter::UsageKind("connection".to_string())),
+
         _ => None,
     }
 }
@@ -1330,8 +1362,13 @@ mod tests {
 
     #[test]
     fn parse_kind_filter_values() {
-        assert_eq!(parse_kind_filter("parts"), Some(KindFilter::DefKind(DefKind::Part)));
-        assert_eq!(parse_kind_filter("port"), Some(KindFilter::UsageKind("port".to_string())));
+        // Plural and singular both return Both (defs + usages)
+        assert_eq!(parse_kind_filter("parts"), Some(KindFilter::Both(DefKind::Part, "part".to_string())));
+        assert_eq!(parse_kind_filter("port"), Some(KindFilter::Both(DefKind::Port, "port".to_string())));
+        // Suffix -def restricts to definitions only
+        assert_eq!(parse_kind_filter("part-def"), Some(KindFilter::DefKind(DefKind::Part)));
+        // Suffix -usage restricts to usages only
+        assert_eq!(parse_kind_filter("part-usage"), Some(KindFilter::UsageKind("part".to_string())));
         assert_eq!(parse_kind_filter("all"), Some(KindFilter::All));
         assert_eq!(parse_kind_filter("nonsense"), None);
     }

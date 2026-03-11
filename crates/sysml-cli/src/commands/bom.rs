@@ -158,20 +158,31 @@ fn run_add(file: Option<&PathBuf>, inside: Option<&str>) -> ExitCode {
     }
     eprintln!();
 
-    if let Some(target) = file {
-        match crate::model_writer::write_to_model(target, &sysml_text, inside) {
-            Ok(()) => {
-                eprintln!("Wrote {} to {}", name, target.display());
-                ExitCode::SUCCESS
+    let (target, parent) = if let Some(f) = file {
+        (f.clone(), inside.map(|s| s.to_string()))
+    } else {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        match crate::model_writer::select_target_file(&cwd) {
+            Some(f) => {
+                let parent = crate::model_writer::select_parent_def(&f);
+                (f, parent)
             }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::FAILURE
+            None => {
+                println!("{}", sysml_text);
+                return ExitCode::SUCCESS;
             }
         }
-    } else {
-        println!("{}", sysml_text);
-        ExitCode::SUCCESS
+    };
+
+    match crate::model_writer::write_to_model(&target, &sysml_text, parent.as_deref()) {
+        Ok(()) => {
+            eprintln!("Wrote {} to {}", name, target.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            ExitCode::FAILURE
+        }
     }
 }
 
