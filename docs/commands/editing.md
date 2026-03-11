@@ -6,23 +6,89 @@ Commands for generating, modifying, and formatting SysML v2 source files.
 
 Add an element to a SysML model — interactively, to a file, or to stdout.
 
-With no arguments, launches a guided wizard using domain vocabulary. With a file, kind, and name, inserts directly. With `--stdout`, prints to terminal without modifying files.
+The **interactive wizard** is the primary workflow. With no arguments it guides you through creating any element. With a file, it shows model-aware type suggestions. Flags provide the same functionality for scripting and CI.
 
 ```sh
 sysml add                                                  # interactive wizard
+sysml add model.sysml                                      # wizard with model context
 sysml add model.sysml part-def Vehicle                     # insert into file
 sysml add model.sysml part engine -t Engine --inside Vehicle  # usage inside def
 sysml add --stdout part-def Vehicle                        # print to stdout
 sysml add --stdout --teach part-def Vehicle                # with teaching comments
-sysml add --stdout part-def Vehicle --extends Base --doc "A vehicle"
-sysml add --stdout part-def Vehicle -m "part engine:Engine" -m "part wheels:Wheel"
-sysml add --stdout port-def FuelPort -m "in item fuel:FuelType"
-sysml add --stdout view-def PartsView --expose "Vehicle::*" --filter part
 ```
 
-**Available kinds:** `part-def`, `port-def`, `action-def`, `state-def`, `constraint-def`, `calc-def`, `requirement` (`req`), `enum-def`, `attribute-def` (`attr`), `item-def`, `view-def`, `viewpoint-def`, `package` (`pkg`), `use-case`, `connection-def`, `interface-def`, `flow-def`, `allocation-def`
+### Definitions (types)
 
-Usage-level kinds (no `-def` suffix) generate `kind name [: type];` usages suitable for insertion inside a definition.
+```sh
+sysml add model.sysml part-def Vehicle --extends Base --doc "A vehicle"
+sysml add model.sysml port-def FuelPort -m "in item fuel:FuelType"
+sysml add model.sysml enum-def Color -m red,green,blue
+```
+
+### State machines
+
+```sh
+sysml add model.sysml state-def EngineStates \
+    -m "entry; then off;" \
+    -m "state off,state starting,state running" \
+    -m "transition first off accept startCmd then starting" \
+    -m "transition first starting then running"
+```
+
+### Actions with successions
+
+```sh
+sysml add model.sysml action-def ReadSensors \
+    -m "action readTemp,action processData" \
+    -m "first readTemp then processData"
+```
+
+### Constraints with expressions
+
+```sh
+sysml add model.sysml constraint-def TempLimit \
+    -m "in attribute temp:Real" \
+    -m "constraint temp >= -40 and temp <= 60"
+```
+
+### Calculations with return type
+
+```sh
+sysml add model.sysml calc-def BatteryRuntime \
+    -m "in attribute capacity:Real,in attribute consumption:Real" \
+    -m "return hours:Real"
+```
+
+### Verification cases
+
+```sh
+sysml add model.sysml verification-def TestAccuracy \
+    --doc "Verify sensor accuracy" \
+    -m "subject testSubject" \
+    -m "requirement tempReq:TemperatureAccuracy"
+```
+
+### Connections, satisfy, verify, imports
+
+```sh
+sysml add model.sysml connection tempConn -t SensorConnection \
+    --connect "tempSensor.dataOut to controller.tempIn" --inside Assembly
+
+sysml add model.sysml satisfy TemperatureAccuracy --by TemperatureSensor
+sysml add model.sysml verify TemperatureAccuracy --by TestAccuracy
+sysml add model.sysml import "WeatherStation::*"
+```
+
+### Multiplicity
+
+```sh
+sysml add model.sysml part-def Vehicle \
+    -m "part wheels:Wheel[4],attribute doors:Door[2..5]"
+```
+
+**Available kinds:** `part-def`, `port-def`, `action-def`, `state-def`, `constraint-def`, `calc-def`, `requirement` (`req`), `enum-def`, `attribute-def` (`attr`), `item-def`, `view-def`, `viewpoint-def`, `package` (`pkg`), `use-case`, `connection-def`, `interface-def`, `flow-def`, `allocation-def`, `verification-def` (`vcase`)
+
+Usage-level kinds (no `-def` suffix) generate `kind name [: type];` usages suitable for insertion inside a definition. Special kinds: `import`, `satisfy`, `verify`, `connection` (with `--connect`).
 
 | Option | Description |
 |--------|-------------|
@@ -32,13 +98,41 @@ Usage-level kinds (no `-def` suffix) generate `kind name [: type];` usages suita
 | `--abstract` | Mark as abstract |
 | `--short-name <ALIAS>` | Short name (`<alias>` before the name) |
 | `--doc <TEXT>` | Documentation comment (`doc /* text */`) |
-| `-m, --member <SPEC>` | Add member (repeatable): `"[dir] kind name[:type]"` |
+| `-m, --member <SPEC>` | Add members (repeatable, comma-separated). Format: `"[dir] kind name[:type[mult]]"` |
+| `--connect <ENDPOINTS>` | Connection binding: `"a.portOut to b.portIn"` |
+| `--by <ELEMENT>` | Target element for satisfy/verify relationships |
+| `--satisfy <REQ>` | Create satisfy relationship (with `--by`) |
+| `--verify <REQ>` | Create verify relationship (with `--by`) |
 | `--expose <PATTERN>` | (view-def) Expose clause: `"Vehicle::*"` |
 | `--filter <KIND>` | (view-def) Filter by element kind |
 | `--stdout` | Print to stdout without modifying files |
 | `--teach` | Include teaching comments explaining every SysML v2 construct used |
 | `--dry-run` | Preview changes as a unified diff without writing |
 | `-i, --interactive` | Launch interactive wizard even when other args are provided |
+
+### Raw-line members
+
+For transitions, successions, and constraint expressions, `-m` renders verbatim text:
+
+| Pattern | Detected by first word | Example |
+|---------|----------------------|---------|
+| `transition ...` | `transition` | `transition first idle accept go then running` |
+| `entry; then ...` | `entry` | `entry; then off;` |
+| `exit ...` | `exit` | `exit action cleanup` |
+| `first ... then ...` | `first` | `first step1 then step2` |
+| `accept ...` | `accept` | `accept signal` |
+| `send ...` | `send` | `send msg to target` |
+| `constraint <expr>` | `constraint` + operators | `constraint x >= 0 and x <= 100` |
+
+### Import hints
+
+After inserting an element with a type reference not defined in the current file, `add` prints a hint:
+
+```
+Added `tempSensor` to model.sysml
+  hint: `TemperatureSensor` is not defined in this file. You may need:
+    sysml add model.sysml import '...::TemperatureSensor'
+```
 
 ### Dispatch modes
 

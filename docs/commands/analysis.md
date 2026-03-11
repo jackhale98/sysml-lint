@@ -9,8 +9,8 @@ Validate SysML v2 files against structural rules.
 ```sh
 sysml lint model.sysml
 sysml lint src/*.sysml                       # Multiple files
-sysml lint model.sysml -I lib/               # Include imports
 sysml lint -f json model.sysml               # JSON output
+sysml lint model.sysml -I lib/               # Ad-hoc include path
 sysml lint --severity warning model.sysml    # Only warnings+
 sysml lint --disable unused,unresolved model.sysml
 ```

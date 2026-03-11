@@ -228,12 +228,78 @@ sysml add model.sysml calc-def BatteryRuntime \
 ### 2.10 Validate and explore
 
 ```sh
-sysml lint model.sysml
-sysml list model.sysml
-sysml list --kind parts model.sysml
-sysml list --parent WeatherStationUnit model.sysml
-sysml show model.sysml WeatherStationUnit
-sysml stats model.sysml
+$ sysml lint model.sysml
+model.sysml:42:5: note[W001]: part def `WindSensor` is defined but never referenced
+model.sysml:106:5: note[W001]: state def `StationStates` is defined but never referenced
+Found 0 errors, 2 notes.
+```
+
+```sh
+$ sysml list --kind parts model.sysml
+  part def       Sensor (in WeatherStation) [model.sysml:31]
+  part def       TemperatureSensor : Sensor (in WeatherStation) [model.sysml:36]
+  part def       HumiditySensor : Sensor (in WeatherStation) [model.sysml:42]
+  part def       PressureSensor : Sensor (in WeatherStation) [model.sysml:47]
+  part def       WindSensor : Sensor (in WeatherStation) [model.sysml:52]
+  part def       Controller (in WeatherStation) [model.sysml:56]
+  part def       Display (in WeatherStation) [model.sysml:65]
+  part def       PowerSupply (in WeatherStation) [model.sysml:70]
+  part def       Enclosure (in WeatherStation) [model.sysml:75]
+  part def       WeatherStationUnit (in WeatherStation) [model.sysml:80]
+10 element(s) found.
+```
+
+```sh
+$ sysml show model.sysml WeatherStationUnit
+part def WeatherStationUnit
+  parent: WeatherStation
+  location: model.sysml:80:5
+  doc: Complete weather station assembly
+  members:
+    part tempSensor : TemperatureSensor
+    part humiditySensor : HumiditySensor
+    part pressureSensor : PressureSensor
+    part windSensor : WindSensor
+    part controller : Controller
+    part display : Display
+    part power : PowerSupply
+    part enclosure : Enclosure
+    connection tempConn
+    connection humidConn
+    connection pressConn
+    connection windConn
+    connection displayConn
+```
+
+```sh
+$ sysml stats model.sysml
+Model Statistics
+========================================
+Definitions: 16
+Usages:      22
+
+Definitions by kind:
+  part def             10
+  port def              3
+  enum def              2
+  action def            1
+  constraint def        2
+  calc def              1
+  state def             1
+  connection def        0
+  package               1
+
+Relationships:
+  Connections:    5
+  Flows:          0
+  Satisfactions:  0
+  Verifications:  0
+
+Packages:         1
+Abstract defs:    1
+Max nesting:      1
+
+Documentation:    10/15 (67%)
 ```
 
 ## Part 3: Requirements and Traceability
@@ -335,9 +401,22 @@ sysml add verification.sysml verify BatteryLife --by TestBatteryLife
 ### 4.3 Check verification coverage
 
 ```sh
-sysml verify coverage verification.sysml requirements.sysml
-sysml verify list verification.sysml
-sysml verify status verification.sysml requirements.sysml
+$ sysml verify list verification.sysml
+Verification Cases:
+  TestTemperatureAccuracy    verifies: TemperatureAccuracy    method: test
+  TestOperatingRange         verifies: OperatingRange         method: test
+  TestBatteryLife            verifies: BatteryLife            method: test
+
+$ sysml verify status verification.sysml requirements.sysml
+Requirement              Status       Verified By
+---------------------------------------------------
+TemperatureAccuracy      unverified   TestTemperatureAccuracy
+OperatingRange           unverified   TestOperatingRange
+BatteryLife              unverified   TestBatteryLife
+UpdateRate               no case      -
+IPRating                 no case      -
+
+Coverage: 3/5 have verification cases (60%)
 ```
 
 ### 4.4 Execute a verification case
@@ -360,6 +439,30 @@ Record written: .sysml/records/verify-execution-20260310-JaneSmith-ab12.toml
 ```
 
 ## Part 5: Diagrams
+
+Generate diagrams in mermaid, PlantUML, Graphviz DOT, or D2 format.
+
+```sh
+$ sysml diagram -t stm --scope StationStates model.sysml
+---
+title: stm [StationStates]
+---
+stateDiagram-v2
+    off : off
+    initializing : initializing
+    monitoring : monitoring
+    alerting : alerting
+    lowPower : lowPower
+    [*] --> off
+    off --> initializing : powerOn
+    initializing --> monitoring
+    monitoring --> alerting : alertTrigger
+    alerting --> monitoring : clearAlert
+    monitoring --> lowPower : lowBattery
+    lowPower --> monitoring : charged
+```
+
+All 7 diagram types:
 
 ```sh
 sysml diagram -t bdd model.sysml                              # Block definition
@@ -411,17 +514,85 @@ calc BatteryRuntime: 60
 ### 6.3 Action flow
 
 ```sh
-sysml simulate af model.sysml -n ReadSensors
+$ sysml simulate af model.sysml -n ReadSensors
+Action: ReadSensors
+
+  Step 0: [perform] perform readTemp
+  Step 1: [perform] perform readHumidity
+  Step 2: [perform] perform readPressure
+  Step 3: [perform] perform readWind
+  Step 4: [perform] perform processData
+  Step 5: [perform] perform updateDisplay
+
+Status: completed (6 steps)
 ```
 
 ## Part 7: Analysis
 
+### 7.1 Dependency analysis
+
 ```sh
-sysml deps model.sysml WeatherStationUnit           # What does it depend on?
-sysml deps model.sysml TemperatureSensor --reverse   # What uses it?
-sysml interfaces --unconnected model.sysml           # Find unconnected ports
+$ sysml deps model.sysml WeatherStationUnit
+Dependency Analysis: WeatherStationUnit
+========================================
+
+Referenced by (0):
+  (none)
+
+Depends on (8):
+  TemperatureSensor (part) via type_ref
+  HumiditySensor (part) via type_ref
+  PressureSensor (part) via type_ref
+  WindSensor (part) via type_ref
+  Controller (part) via type_ref
+  Display (part) via type_ref
+  PowerSupply (part) via type_ref
+  Enclosure (part) via type_ref
+
+$ sysml deps model.sysml TemperatureSensor --reverse
+Dependency Analysis: TemperatureSensor
+========================================
+
+Referenced by (1):
+  WeatherStationUnit (part) via type_ref
+```
+
+### 7.2 Interface analysis
+
+```sh
+$ sysml interfaces --unconnected model.sysml
+Unconnected Ports:
+  Name            Owner           Type            Direction
+  -------------------------------------------------------
+  power           Controller      PowerPort       -
+  power           Display         PowerPort       -
+2 port(s) found.
+```
+
+### 7.3 Model coverage
+
+```sh
+$ sysml coverage model.sysml
+Model Coverage Report
+==================================================
+
+Unverified requirements (2):
+  TemperatureAccuracy
+  OperatingRange
+
+Summary:
+  Documentation:       67%
+  Typed usages:        91%
+  Populated defs:      80%
+  Req satisfaction:    100%
+  Req verification:    0%
+  Overall score:       64%
+```
+
+### 7.4 Other analysis commands
+
+```sh
 sysml allocation model.sysml                         # Allocation matrix
-sysml coverage model.sysml                           # Model completeness
 sysml diff model.sysml model-v2.sysml                # Semantic diff
 ```
 
@@ -556,23 +727,93 @@ Category      Open  In Progress  Closed  Total
 Dimensional      1            0       0      1
 ```
 
-## Part 10: Editing
+## Part 10: Bill of Materials
 
-### 10.1 Add new elements
+### 10.1 Add BOM attributes
+
+Add mass and cost properties to your parts using the BOM library types:
+
+```sh
+sysml add model.sysml import "SysMLBOM::*"
+
+# Add identity and mass to existing parts
+sysml add model.sysml attribute partNumber -t ScalarValues::String --inside TemperatureSensor
+sysml add model.sysml attribute mass_kg -t ScalarValues::Real --inside TemperatureSensor
+```
+
+Or use the interactive BOM wizard:
+
+```sh
+$ sysml bom add --file model.sysml
+? Part name: TemperatureSensor
+? Part number (Enter to skip): TS-100
+? Category: > component
+? Mass (kg, Enter to skip): 0.15
+? Unit cost (Enter to skip): 45.00
+
+Preview:
+  part def TemperatureSensor {
+      attribute partNumber = "TS-100";
+      attribute mass_kg = 0.15;
+      attribute unit_cost = 45.00;
+  }
+```
+
+### 10.2 BOM rollup
+
+```sh
+$ sysml bom rollup model.sysml --root WeatherStationUnit --include-mass --include-cost
+WeatherStationUnit : WeatherStationUnit  mass=0.000kg  cost=0.00
+  tempSensor : TemperatureSensor [TS-100]  mass=0.150kg  cost=45.00
+  humiditySensor : HumiditySensor [HS-200]  mass=0.120kg  cost=38.00
+  pressureSensor : PressureSensor [PS-300]  mass=0.180kg  cost=52.00
+  windSensor : WindSensor [WS-400]  mass=0.250kg  cost=65.00
+  controller : Controller [CT-500]  mass=0.350kg  cost=120.00
+  display : Display [DS-600]  mass=0.200kg  cost=85.00
+  power : PowerSupply [PW-700]  mass=1.200kg  cost=95.00
+  enclosure : Enclosure [EN-800]  mass=2.500kg  cost=180.00
+BOM: 9 total parts, 9 unique, depth 2
+Total mass: 4.950 kg
+Total cost: 680.00 (recurring), 0.00 (tooling)
+```
+
+### 10.3 Where-used and export
+
+```sh
+$ sysml bom where-used model.sysml --part TemperatureSensor
+Part `TemperatureSensor` is used in:
+  WeatherStationUnit
+
+$ sysml bom export model.sysml --root WeatherStationUnit
+Level,Name,Definition,Quantity,PartNumber,Revision,Description,Category
+0,WeatherStationUnit,WeatherStationUnit,1,,,,assembly
+1,tempSensor,TemperatureSensor,1,TS-100,A,,component
+1,humiditySensor,HumiditySensor,1,HS-200,A,,component
+1,controller,Controller,1,CT-500,A,,component
+1,display,Display,1,DS-600,A,,component
+1,power,PowerSupply,1,PW-700,A,,component
+1,enclosure,Enclosure,1,EN-800,A,,assembly
+```
+
+SysML v2 multiplicity is the BOM quantity — `part wheels : Wheel[4]` = 4 units in the rollup.
+
+## Part 11: Editing
+
+### 11.1 Add new elements
 
 ```sh
 sysml add model.sysml part-def RainGauge --extends Sensor --doc "Measures rainfall"
 sysml add model.sysml part rainGauge -t RainGauge --inside WeatherStationUnit
 ```
 
-### 10.2 Preview and multiplicity
+### 11.2 Preview and multiplicity
 
 ```sh
 sysml add model.sysml part-def Vehicle \
     -m "part wheels:Wheel[4],attribute doors:Door[2..5]" --dry-run
 ```
 
-### 10.3 Remove and rename
+### 11.3 Remove and rename
 
 ```sh
 sysml remove model.sysml RainGauge --dry-run    # Preview
@@ -580,33 +821,79 @@ sysml remove model.sysml RainGauge              # Apply
 sysml rename model.sysml WindSensor Anemometer
 ```
 
-### 10.4 Learn SysML syntax
+### 11.4 Learn SysML syntax
 
 ```sh
-sysml add --stdout --teach part-def Motor
-sysml add --stdout --teach state-def Lifecycle
+$ sysml add --stdout --teach part-def Motor
+// A "part def" defines a reusable component type in SysML v2.
+// Parts are physical or logical components that make up a system.
+// Other definitions can specialize this with `:>` (e.g., ElectricMotor :> Motor).
+part def Motor {
+    // Add attributes with: attribute name : Type;
+    // Add ports with:      port name : PortType;
+    // Add nested parts:    part name : PartType;
+}
 ```
 
-## Part 11: Export and Reports
+## Part 12: Export and Reports
+
+### 12.1 Export
 
 ```sh
 sysml export interfaces model.sysml --part Controller   # FMI 3.0
 sysml export modelica model.sysml --part Controller      # Modelica
 sysml export ssp model.sysml -o system.ssd               # SSP XML
-
-sysml report dashboard model.sysml requirements.sysml verification.sysml
-sysml report gate model.sysml requirements.sysml --gate-name CDR --min-coverage 80
 ```
 
-## Part 12: Formatting and CI
+### 12.2 Reports
 
 ```sh
-sysml fmt model.sysml                   # Format in place
-sysml fmt --check model.sysml           # CI mode
-sysml fmt --diff model.sysml            # Preview changes
+$ sysml report dashboard model.sysml requirements.sysml verification.sysml
+Project Dashboard
+========================================
+Requirements:     5  (100% satisfied, 60% verified)
+Risks:            2  (1 critical, avg RPN: 48)
+Open NCRs:        1  (1 major)
+BOM Parts:        10
+Documentation:    67%
 
-sysml pipeline run ci                   # Run validation pipeline
-sysml lint -f json model.sysml          # JSON output for tooling
+$ sysml report gate requirements.sysml verification.sysml --gate-name PDR
+Gate Readiness: PDR (Preliminary Design Review)
+========================================
+  Verification coverage:  60%  (threshold: 50%)  PASS
+  Open critical risks:    1    (max: 3)           PASS
+  Open major NCRs:        1    (max: 5)           PASS
+
+Result: READY
+```
+
+## Part 13: Formatting and CI
+
+```sh
+$ sysml fmt --diff model.sysml
+--- model.sysml
++++ model.sysml (formatted)
+@@ -31,7 +31,7 @@
+-    attribute status:SensorStatus;
++    attribute status : SensorStatus;
+
+$ sysml fmt model.sysml                   # Format in place
+$ sysml fmt --check model.sysml           # CI mode (exit 1 if unformatted)
+
+$ sysml pipeline run ci
+[1/4] lint *.sysml ... ok
+[2/4] fmt --check *.sysml ... ok
+[3/4] trace --check --min-coverage 80 *.sysml ... ok
+[4/4] coverage --check --min-score 60 *.sysml ... ok
+
+Pipeline "ci": all 4 steps passed.
+```
+
+JSON output for editor integration:
+
+```sh
+sysml lint -f json model.sysml          # Diagnostics as JSON array
+sysml list -f json model.sysml          # Element list as JSON
 ```
 
 ## Quick Reference

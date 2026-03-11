@@ -18,6 +18,8 @@ sysml init --force    # Overwrite existing config
 Creates:
 - `.sysml/config.toml` — project configuration (name, model root, library paths, defaults)
 - Adds `.sysml/cache.db*` to `.gitignore`
+- Auto-detects `libraries/` directory and adds it to `library_paths`
+- Auto-detects `model/` directory and sets `model_root`
 
 The config file supports:
 
@@ -32,6 +34,8 @@ author = "jhale"
 output_dir = "records/"
 format = "text"
 ```
+
+**Library auto-resolution:** When `library_paths` is set in config, all commands automatically include those paths for import resolution — no `-I` flag needed.
 
 **Precedence:** CLI flags > env vars (`SYSML_MODEL_ROOT`, etc.) > config file > defaults.
 

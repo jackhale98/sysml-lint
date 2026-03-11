@@ -28,19 +28,31 @@ package MyProject {
 }
 ```
 
-Include libraries with the `-I` flag:
+### Setup
+
+Run `sysml init` in a project with a `libraries/` directory — it automatically configures `library_paths`:
 
 ```sh
-sysml lint model.sysml -I libraries/
-sysml risk matrix model.sysml -I libraries/
+cp -r /path/to/sysml-cli/libraries .
+sysml init
+# library_path = "libraries/"
 ```
 
-Or configure in `.sysml/config.toml`:
+All commands then resolve imports automatically. No `-I` flag needed:
+
+```sh
+sysml lint model.sysml
+sysml risk matrix model.sysml
+```
+
+You can also set library paths manually in `.sysml/config.toml`:
 
 ```toml
 [project]
-library_paths = ["libraries/"]
+library_paths = ["libraries/", "vendor/models/"]
 ```
+
+Or use `-I` for ad-hoc includes: `sysml lint model.sysml -I /other/libs/`
 
 ## Library Reference
 

@@ -19,6 +19,9 @@ jobs:
           cargo build --release
           echo "/tmp/sysml-cli/target/release" >> $GITHUB_PATH
 
+      - name: Initialize project
+        run: sysml init --force
+
       - name: Lint models
         run: sysml lint --severity warning models/**/*.sysml
 
@@ -67,3 +70,9 @@ sysml simulate list -f json model.sysml # Simulatable items as JSON
 ```
 
 This works with any editor that can parse JSON from a subprocess — VS Code extensions, Neovim plugins, etc.
+
+## Library resolution in CI
+
+If your project has `.sysml/config.toml` with `library_paths` configured (set automatically by `sysml init` when `libraries/` exists), all commands resolve imports automatically — no `-I` flag needed in CI steps.
+
+For projects without a config, run `sysml init --force` as a CI step (see GitHub Actions example above) or pass `-I` explicitly.
