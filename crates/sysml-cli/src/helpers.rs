@@ -150,20 +150,52 @@ pub(crate) fn resolve_include_paths(cli: &crate::Cli) -> Vec<PathBuf> {
         }
     }
 
-    // Try loading config for stdlib_path if not already provided
-    if cli.stdlib_path.is_none() {
-        let config_path = std::path::Path::new(".sysml/config.toml");
-        if config_path.exists() {
-            if let Ok(config) = sysml_core::config::ProjectConfig::load(config_path) {
+    // Load config for stdlib_path and library_paths
+    let config_path = std::path::Path::new(".sysml/config.toml");
+    if config_path.exists() {
+        if let Ok(config) = sysml_core::config::ProjectConfig::load(config_path) {
+            // Add stdlib from config if not already provided via CLI/env
+            if cli.stdlib_path.is_none() {
                 if let Some(stdlib) = config.project.stdlib_path {
                     if stdlib.is_dir() && !paths.contains(&stdlib) {
                         paths.push(stdlib);
                     }
                 }
             }
+
+            // Always add library_paths from config
+            for lib_path in &config.project.library_paths {
+                if lib_path.is_dir() && !paths.contains(lib_path) {
+                    paths.push(lib_path.clone());
+                }
+            }
         }
     }
 
+    paths
+}
+
+/// Resolve project include paths from config only (no CLI flags needed).
+///
+/// Reads `.sysml/config.toml` for `library_paths` and `stdlib_path`.
+/// Used by commands that need library resolution without the Cli struct.
+pub(crate) fn resolve_project_includes() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let config_path = std::path::Path::new(".sysml/config.toml");
+    if config_path.exists() {
+        if let Ok(config) = sysml_core::config::ProjectConfig::load(config_path) {
+            if let Some(stdlib) = config.project.stdlib_path {
+                if stdlib.is_dir() {
+                    paths.push(stdlib);
+                }
+            }
+            for lib_path in &config.project.library_paths {
+                if lib_path.is_dir() && !paths.contains(lib_path) {
+                    paths.push(lib_path.clone());
+                }
+            }
+        }
+    }
     paths
 }
 

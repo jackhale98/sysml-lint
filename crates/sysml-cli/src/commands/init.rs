@@ -29,9 +29,15 @@ pub(crate) fn run(_cli: &Cli, force: bool) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // Build a default config, auto-detecting model_root.
+    // Build a default config, auto-detecting model_root and library paths.
     let mut config = ProjectConfig::default();
     config.project.model_root = detect_model_root(&cwd);
+
+    // Auto-detect libraries/ directory
+    let lib_dir = cwd.join("libraries");
+    if lib_dir.is_dir() && has_sysml_files(&lib_dir) {
+        config.project.library_paths.push(std::path::PathBuf::from("libraries/"));
+    }
 
     // Try to derive a project name from the directory name.
     if let Some(name) = cwd.file_name().and_then(|n| n.to_str()) {
@@ -60,6 +66,11 @@ pub(crate) fn run(_cli: &Cli, force: bool) -> ExitCode {
             "  model_root = \"{}\"",
             config.project.model_root.display()
         );
+    }
+    if !config.project.library_paths.is_empty() {
+        for lib in &config.project.library_paths {
+            println!("  library_path = \"{}\"", lib.display());
+        }
     }
 
     ExitCode::SUCCESS

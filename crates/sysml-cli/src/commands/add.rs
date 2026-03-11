@@ -102,7 +102,7 @@ pub(crate) fn run(
         // No file but kind+name → stdout mode
         (None, Some(kind), Some(name)) => {
             run_stdout(kind, name, extends, is_abstract, short_name, doc,
-                       members, exposes, filter, teach, type_ref, connect)
+                       members, exposes, filter, teach, type_ref, connect, by)
         }
         // File but no kind/name → guided file mode
         (Some(file), None, None) if !stdout => {
@@ -112,10 +112,10 @@ pub(crate) fn run(
         (Some(file), Some(kind), Some(name)) => {
             if stdout {
                 run_stdout(kind, name, extends, is_abstract, short_name, doc,
-                           members, exposes, filter, teach, type_ref, connect)
+                           members, exposes, filter, teach, type_ref, connect, by)
             } else {
                 run_insert(file, kind, name, type_ref, inside, dry_run,
-                           doc, extends, is_abstract, short_name, members, connect)
+                           doc, extends, is_abstract, short_name, members, connect, by)
             }
         }
         // Partial args
@@ -192,6 +192,7 @@ fn run_stdout(
     teach: bool,
     type_ref: Option<&str>,
     connect: Option<&str>,
+    by: Option<&str>,
 ) -> ExitCode {
     // For teach mode, delegate to scaffold
     if teach {
@@ -220,8 +221,8 @@ fn run_stdout(
             return ExitCode::SUCCESS;
         }
         "satisfy" => {
-            if let Some(by) = type_ref.or(extends) {
-                print!("{}", template::generate_relationship("satisfy", name, by, 0));
+            if let Some(target) = by.or(type_ref).or(extends) {
+                print!("{}", template::generate_relationship("satisfy", name, target, 0));
             } else {
                 eprintln!("error: satisfy requires --by <element> (or -t <element>)");
                 return ExitCode::from(1);
@@ -229,8 +230,8 @@ fn run_stdout(
             return ExitCode::SUCCESS;
         }
         "verify" => {
-            if let Some(by) = type_ref.or(extends) {
-                print!("{}", template::generate_relationship("verify", name, by, 0));
+            if let Some(target) = by.or(type_ref).or(extends) {
+                print!("{}", template::generate_relationship("verify", name, target, 0));
             } else {
                 eprintln!("error: verify requires --by <element> (or -t <element>)");
                 return ExitCode::from(1);
@@ -315,6 +316,7 @@ fn parse_members(members: &[String], kind: &str) -> Vec<template::MemberSpec> {
                     type_ref: None,
                     direction: None,
                     multiplicity: None,
+                    raw_line: false,
                 })
             } else {
                 template::parse_member_spec(s)
@@ -346,7 +348,7 @@ fn run_wizard_mode() -> ExitCode {
             ("file", "Add to an existing file (model-aware)"),
             ("stdout", "Print to terminal (no file context)"),
         ],
-    ).with_explanation("Choosing a file lets the wizard show available types from your model.");
+    ).with_explanation("File mode shows available types from your model.");
 
     let dest = match runner.run_step(&dest_step) {
         Some(WizardAnswer::String(s)) => s,
@@ -387,22 +389,30 @@ fn run_wizard_mode_with_file(file: &PathBuf) -> ExitCode {
     run_wizard_with_context(&runner, Some(file), model.as_ref())
 }
 
-/// Parse a file and collect all .sysml files in the same directory for context.
+/// Parse a file and collect all .sysml files in the same directory + project
+/// library paths for type context.
 fn parse_file_context(file: &PathBuf) -> Option<sysml_core::model::Model> {
     let (path_str, source) = read_source(file).ok()?;
     let mut model = sysml_parser::parse_file(&path_str, &source);
 
-    // Also parse sibling .sysml files in the same directory for type context
+    // Collect sibling .sysml files in the same directory
+    let mut extra_files = Vec::new();
     if let Some(parent_dir) = file.parent() {
-        let mut sibling_files = Vec::new();
-        crate::collect_files_recursive(&parent_dir.to_path_buf(), &mut sibling_files);
-        for sibling in &sibling_files {
-            if sibling == file { continue; }
-            if let Ok((sib_path, sib_source)) = read_source(sibling) {
-                let sib_model = sysml_parser::parse_file(&sib_path, &sib_source);
-                model.definitions.extend(sib_model.definitions.into_iter());
-                model.usages.extend(sib_model.usages.into_iter());
-            }
+        crate::collect_files_recursive(&parent_dir.to_path_buf(), &mut extra_files);
+    }
+
+    // Also include project library paths (from .sysml/config.toml)
+    for lib_path in crate::resolve_project_includes() {
+        crate::collect_files_recursive(&lib_path, &mut extra_files);
+    }
+
+    // Parse all extra files for type context
+    for extra in &extra_files {
+        if extra == file { continue; }
+        if let Ok((ext_path, ext_source)) = read_source(extra) {
+            let ext_model = sysml_parser::parse_file(&ext_path, &ext_source);
+            model.definitions.extend(ext_model.definitions.into_iter());
+            model.usages.extend(ext_model.usages.into_iter());
         }
     }
 
@@ -491,27 +501,29 @@ fn run_wizard_with_context(
         "concept",
         "What are you creating?",
         vec![
-            ("part-def", "A new type: physical component or assembly"),
-            ("port-def", "A new type: interaction point (port)"),
-            ("action-def", "A new type: behavior or process"),
-            ("requirement", "A new type: requirement or constraint"),
-            ("state-def", "A new type: state machine"),
-            ("attribute-def", "A new type: data type or property"),
-            ("enum-def", "A new type: enumeration"),
-            ("calc-def", "A new type: calculation or formula"),
-            ("connection-def", "A new type: connection definition"),
-            ("part", "An instance: component (part usage)"),
-            ("port", "An instance: port (port usage)"),
-            ("attribute", "An instance: property (attribute usage)"),
-            ("action", "An instance: action step"),
-            ("connection", "A connection between parts"),
-            ("satisfy", "A satisfy relationship (requirement → implementation)"),
-            ("verify", "A verify relationship (requirement → test)"),
-            ("import", "An import statement"),
-            ("package", "A package (organizational grouping)"),
-            ("other", "Something else (I know the SysML kind)"),
+            ("part-def", "Part definition (component type)"),
+            ("port-def", "Port definition (interface point)"),
+            ("action-def", "Action definition (behavior)"),
+            ("state-def", "State machine definition"),
+            ("requirement", "Requirement"),
+            ("constraint-def", "Constraint definition"),
+            ("calc-def", "Calculation definition"),
+            ("enum-def", "Enumeration"),
+            ("attribute-def", "Attribute definition (data type)"),
+            ("connection-def", "Connection definition"),
+            ("verification-def", "Verification case"),
+            ("part", "Part usage (instance)"),
+            ("port", "Port usage"),
+            ("attribute", "Attribute usage"),
+            ("action", "Action step"),
+            ("connection", "Connection (wiring)"),
+            ("satisfy", "Satisfy relationship"),
+            ("verify", "Verify relationship"),
+            ("import", "Import statement"),
+            ("package", "Package"),
+            ("other", "Other (manual kind entry)"),
         ],
-    ).with_explanation("SysML has definitions (types), usages (instances), and relationships.");
+    );
 
     let kind = match runner.run_step(&concept_step) {
         Some(WizardAnswer::String(s)) => s,
@@ -533,7 +545,7 @@ fn run_wizard_with_context(
     match kind.as_str() {
         "import" => {
             let path_step = WizardStep::string("import_path", "Import path (e.g., Vehicles::* or Sensors::Temp)")
-                .with_explanation("Use :: for nesting and * for wildcard imports.");
+                .with_explanation("Use :: for nesting, * for wildcard.");
             let path = match runner.run_step(&path_step) {
                 Some(WizardAnswer::String(s)) if !s.is_empty() => s,
                 _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
@@ -567,7 +579,7 @@ fn run_wizard_with_context(
                 _ => None,
             };
             let endpoints_step = WizardStep::string("endpoints", "Connect endpoints (e.g., a.portOut to b.portIn)")
-                .with_explanation("Format: <source>.<port> to <target>.<port>");
+                .with_explanation("e.g. a.portOut to b.portIn");
             let endpoints = match runner.run_step(&endpoints_step) {
                 Some(WizardAnswer::String(s)) if !s.is_empty() => s,
                 _ => { eprintln!("Cancelled."); return ExitCode::FAILURE; }
@@ -613,7 +625,7 @@ fn run_wizard_with_context(
     // For enum-def — prompt for enum members
     let enum_members = if kind == "enum-def" {
         let members_step = WizardStep::string("enum_members", "Enum members (comma-separated, e.g., red,green,blue)")
-            .with_explanation("Each name becomes an `enum <name>;` member.").optional();
+            .with_explanation("Comma-separated list.").optional();
         match runner.run_step(&members_step) {
             Some(WizardAnswer::String(s)) if !s.is_empty() => {
                 s.split(',')
@@ -623,6 +635,7 @@ fn run_wizard_with_context(
                         type_ref: None,
                         direction: None,
                         multiplicity: None,
+                        raw_line: false,
                     })
                     .filter(|m| !m.name.is_empty())
                     .collect()
@@ -753,7 +766,7 @@ fn wizard_extends_prompt(
             let step = WizardStep {
                 id: "extends".into(),
                 prompt: format!("Extend another {} type?", kind.replace("-def", "")),
-                explanation: Some(format!("Available {}s from your model", kind.replace("-def", ""))),
+                explanation: None,
                 kind: PromptKind::Choice(choice_options),
                 required: false,
                 default: None,
@@ -802,7 +815,7 @@ fn wizard_type_ref_prompt(
             let step = WizardStep {
                 id: "type_ref".into(),
                 prompt: format!("Type for this {} usage?", kind),
-                explanation: Some(format!("Available {} definitions from your model", kind)),
+                explanation: None,
                 kind: PromptKind::Choice(choice_options),
                 required: false,
                 default: None,
@@ -821,7 +834,7 @@ fn wizard_type_ref_prompt(
         }
     }
     let step = WizardStep::string("type_ref", "Type reference? (Enter to skip)")
-        .with_explanation("The definition this usage instantiates.").optional();
+        .optional();
     match runner.run_step(&step) {
         Some(WizardAnswer::String(s)) if !s.is_empty() => Some(s),
         _ => None,
@@ -843,6 +856,7 @@ fn run_insert(
     short_name: Option<&str>,
     members: &[String],
     connect: Option<&str>,
+    by: Option<&str>,
 ) -> ExitCode {
     let (path_str, source) = match read_source(file) {
         Ok(v) => v,
@@ -857,12 +871,12 @@ fn run_insert(
             template::generate_import(name, 0)
         }
         "satisfy" => {
-            let by = type_ref.or(extends).unwrap_or("TODO");
-            template::generate_relationship("satisfy", name, by, 0)
+            let target = by.or(type_ref).or(extends).unwrap_or("TODO");
+            template::generate_relationship("satisfy", name, target, 0)
         }
         "verify" => {
-            let by = type_ref.or(extends).unwrap_or("TODO");
-            template::generate_relationship("verify", name, by, 0)
+            let target = by.or(type_ref).or(extends).unwrap_or("TODO");
+            template::generate_relationship("verify", name, target, 0)
         }
         "connection" if connect.is_some() => {
             template::generate_connection_usage(name, type_ref, connect.unwrap(), 0)
@@ -957,6 +971,24 @@ fn run_insert(
             return ExitCode::from(1);
         }
         eprintln!("Added `{}` to {}", name, path_str);
+
+        // Suggest import if type reference is not defined in this file
+        let refs_to_check: Vec<&str> = [type_ref, extends]
+            .iter()
+            .filter_map(|r| *r)
+            .filter(|r| !r.contains("::"))  // Skip already-qualified refs
+            .collect();
+        if !refs_to_check.is_empty() {
+            let updated = std::fs::read_to_string(file).unwrap_or_default();
+            let updated_model = sysml_parser::parse_file(&path_str, &updated);
+            for tr in refs_to_check {
+                let defined = updated_model.definitions.iter().any(|d| d.name == tr);
+                if !defined {
+                    eprintln!("  hint: `{}` is not defined in this file. You may need:", tr);
+                    eprintln!("    sysml add {} import '...::{}'", path_str, tr);
+                }
+            }
+        }
     }
     ExitCode::SUCCESS
 }

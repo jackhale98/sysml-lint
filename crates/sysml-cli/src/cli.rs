@@ -328,9 +328,10 @@ pub(crate) enum Command {
         #[arg(long)]
         short_name: Option<String>,
 
-        /// Add members (repeatable). Format: "[direction] kind name[:type[mult]]".
-        /// For enum-def, just the member name: -m red -m green -m blue
-        #[arg(long = "member", short = 'm')]
+        /// Add members (repeatable or comma-separated).
+        /// Format: "[direction] kind name[:type[mult]]".
+        /// For enum-def, just the member name: -m red,green,blue
+        #[arg(long = "member", short = 'm', value_delimiter = ',')]
         members: Vec<String>,
 
         /// Connection binding endpoints (e.g., "a.portOut to b.portIn").

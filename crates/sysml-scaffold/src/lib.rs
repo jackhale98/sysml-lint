@@ -268,6 +268,7 @@ fn parse_simple_member(s: &str) -> Option<MemberSpec> {
         type_ref,
         direction,
         multiplicity: None,
+        raw_line: false,
     })
 }
 

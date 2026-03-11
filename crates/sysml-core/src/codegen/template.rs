@@ -28,6 +28,8 @@ pub struct MemberSpec {
     pub type_ref: Option<String>,
     pub direction: Option<String>,
     pub multiplicity: Option<String>,
+    /// If true, render as verbatim text (for transitions, successions, expressions).
+    pub raw_line: bool,
 }
 
 /// Parse a template kind string into a `DefKind`.
@@ -43,6 +45,7 @@ pub fn parse_template_kind(s: &str) -> Option<DefKind> {
         "constraint def" | "constraint" => Some(DefKind::Constraint),
         "calc def" | "calc" => Some(DefKind::Calc),
         "requirement def" | "requirement" | "req" => Some(DefKind::Requirement),
+        "verification def" | "verification" | "verification-def" | "vcase" => Some(DefKind::Verification),
         "use case def" | "use case" | "usecase" => Some(DefKind::UseCase),
         "enum def" | "enum" => Some(DefKind::Enum),
         "attribute def" | "attribute" | "attr" => Some(DefKind::Attribute),
@@ -90,9 +93,15 @@ pub fn generate_template(opts: &TemplateOptions) -> String {
     if has_body {
         out.push_str(" {\n");
 
-        // Doc comment
+        // Doc comment (for verification defs, render as objective block)
         if let Some(ref doc) = opts.doc {
-            out.push_str(&format!("{}doc /* {} */\n", inner_indent, doc));
+            if opts.kind == DefKind::Verification {
+                out.push_str(&format!("{}objective {{\n", inner_indent));
+                out.push_str(&format!("{}    doc /* {} */\n", inner_indent, doc));
+                out.push_str(&format!("{}}}\n", inner_indent));
+            } else {
+                out.push_str(&format!("{}doc /* {} */\n", inner_indent, doc));
+            }
         }
 
         // View-specific: expose clauses
@@ -105,12 +114,20 @@ pub fn generate_template(opts: &TemplateOptions) -> String {
             out.push_str(&format!("{}filter @type istype {};\n", inner_indent, f));
         }
 
-        // Members — for enum defs, render as `enum <name>;`
+        // Members — raw lines, enum members, or structured usages
         let is_enum = opts.kind == DefKind::Enum;
         for member in &opts.members {
             out.push_str(&inner_indent);
 
-            if is_enum {
+            if member.raw_line {
+                // Raw line: verbatim text (transitions, successions, expressions)
+                let text = member.name.trim_end();
+                out.push_str(text);
+                if !text.ends_with(';') {
+                    out.push(';');
+                }
+                out.push('\n');
+            } else if is_enum {
                 // Enum members: just `enum <name>;`
                 out.push_str(&format!("enum {};\n", member.name));
             } else {
@@ -166,10 +183,44 @@ pub fn validate_generated(text: &str) -> Result<(), Vec<String>> {
 ///   - `part wheels:Wheel[4]`
 ///   - `attribute name:String[0..1]`
 pub fn parse_member_spec(s: &str) -> Option<MemberSpec> {
-    let parts: Vec<&str> = s.split_whitespace().collect();
-    if parts.is_empty() {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
         return None;
     }
+
+    // Detect raw-line patterns: transitions, successions, entry/exit, accept/send
+    let first_token = trimmed.split_whitespace().next().unwrap_or("");
+    let first_word = first_token.trim_end_matches(';');
+    if matches!(first_word, "transition" | "entry" | "exit" | "first" | "accept" | "send") {
+        return Some(MemberSpec {
+            usage_kind: String::new(),
+            name: trimmed.to_string(),
+            type_ref: None,
+            direction: None,
+            multiplicity: None,
+            raw_line: true,
+        });
+    }
+
+    // Detect constraint expressions: "constraint <expr with operators>"
+    if first_word == "constraint" {
+        let rest = trimmed.strip_prefix("constraint").unwrap().trim();
+        // If no colon (not a typed usage) and has operator chars, treat as expression
+        if !rest.contains(':') && (rest.contains(">=") || rest.contains("<=")
+            || rest.contains("==") || rest.contains(" and ") || rest.contains(" or "))
+        {
+            return Some(MemberSpec {
+                usage_kind: String::new(),
+                name: rest.to_string(),
+                type_ref: None,
+                direction: None,
+                multiplicity: None,
+                raw_line: true,
+            });
+        }
+    }
+
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
 
     let mut idx = 0;
     let direction = match parts.get(idx) {
@@ -193,6 +244,7 @@ pub fn parse_member_spec(s: &str) -> Option<MemberSpec> {
         type_ref,
         direction,
         multiplicity,
+        raw_line: false,
     })
 }
 
@@ -323,6 +375,7 @@ mod tests {
                     type_ref: Some("Engine".to_string()),
                     direction: None,
                     multiplicity: None,
+                    raw_line: false,
                 },
             ],
             exposes: Vec::new(),
@@ -350,6 +403,7 @@ mod tests {
                     type_ref: Some("FuelType".to_string()),
                     direction: Some("in".to_string()),
                     multiplicity: None,
+                    raw_line: false,
                 },
             ],
             exposes: Vec::new(),
@@ -438,6 +492,7 @@ mod tests {
                 type_ref: Some("Wheel".to_string()),
                 direction: None,
                 multiplicity: Some("4".to_string()),
+                raw_line: false,
             }],
             exposes: Vec::new(),
             filter: None,
@@ -463,6 +518,7 @@ mod tests {
                     type_ref: None,
                     direction: None,
                     multiplicity: None,
+                    raw_line: false,
                 },
                 MemberSpec {
                     usage_kind: "enum".to_string(),
@@ -470,6 +526,7 @@ mod tests {
                     type_ref: None,
                     direction: None,
                     multiplicity: None,
+                    raw_line: false,
                 },
                 MemberSpec {
                     usage_kind: "enum".to_string(),
@@ -477,6 +534,7 @@ mod tests {
                     type_ref: None,
                     direction: None,
                     multiplicity: None,
+                    raw_line: false,
                 },
             ],
             exposes: Vec::new(),
@@ -563,6 +621,184 @@ mod tests {
     fn validate_generated_with_body() {
         let valid = "part def Vehicle {\n    part engine : Engine;\n}\n";
         assert!(validate_generated(valid).is_ok());
+    }
+
+    #[test]
+    fn parse_member_spec_transition() {
+        let m = parse_member_spec("transition first idle accept start then running").unwrap();
+        assert!(m.raw_line);
+        assert_eq!(m.name, "transition first idle accept start then running");
+    }
+
+    #[test]
+    fn parse_member_spec_entry() {
+        let m = parse_member_spec("entry; then idle;").unwrap();
+        assert!(m.raw_line);
+        assert_eq!(m.name, "entry; then idle;");
+    }
+
+    #[test]
+    fn parse_member_spec_first_succession() {
+        let m = parse_member_spec("first readTemp then processData").unwrap();
+        assert!(m.raw_line);
+        assert_eq!(m.name, "first readTemp then processData");
+    }
+
+    #[test]
+    fn parse_member_spec_constraint_expr() {
+        let m = parse_member_spec("constraint temp >= -40 and temp <= 60").unwrap();
+        assert!(m.raw_line);
+        assert_eq!(m.name, "temp >= -40 and temp <= 60");
+    }
+
+    #[test]
+    fn parse_member_spec_constraint_usage_not_raw() {
+        let m = parse_member_spec("constraint tempCheck:TempConstraint").unwrap();
+        assert!(!m.raw_line);
+        assert_eq!(m.usage_kind, "constraint");
+        assert_eq!(m.name, "tempCheck");
+        assert_eq!(m.type_ref.as_deref(), Some("TempConstraint"));
+    }
+
+    #[test]
+    fn parse_member_spec_return() {
+        let m = parse_member_spec("return hours:Real").unwrap();
+        assert!(!m.raw_line);
+        assert_eq!(m.usage_kind, "return");
+        assert_eq!(m.name, "hours");
+        assert_eq!(m.type_ref.as_deref(), Some("Real"));
+    }
+
+    #[test]
+    fn generate_state_def_with_transitions() {
+        let opts = TemplateOptions {
+            kind: DefKind::State,
+            name: "StationStates".to_string(),
+            super_type: None,
+            is_abstract: false,
+            short_name: None,
+            doc: Some("Operating states".to_string()),
+            members: vec![
+                parse_member_spec("entry; then off;").unwrap(),
+                parse_member_spec("state off").unwrap(),
+                parse_member_spec("state monitoring").unwrap(),
+                parse_member_spec("transition first off accept powerOn then monitoring").unwrap(),
+            ],
+            exposes: Vec::new(),
+            filter: None,
+            indent: 0,
+        };
+        let result = generate_template(&opts);
+        assert!(result.contains("state def StationStates {"));
+        assert!(result.contains("entry; then off;"));
+        assert!(result.contains("state off;"));
+        assert!(result.contains("state monitoring;"));
+        assert!(result.contains("transition first off accept powerOn then monitoring;"));
+    }
+
+    #[test]
+    fn generate_action_def_with_steps() {
+        let opts = TemplateOptions {
+            kind: DefKind::Action,
+            name: "ReadSensors".to_string(),
+            super_type: None,
+            is_abstract: false,
+            short_name: None,
+            doc: None,
+            members: vec![
+                parse_member_spec("action readTemp").unwrap(),
+                parse_member_spec("action processData").unwrap(),
+                parse_member_spec("first readTemp then processData").unwrap(),
+            ],
+            exposes: Vec::new(),
+            filter: None,
+            indent: 0,
+        };
+        let result = generate_template(&opts);
+        assert!(result.contains("action def ReadSensors {"));
+        assert!(result.contains("action readTemp;"));
+        assert!(result.contains("first readTemp then processData;"));
+    }
+
+    #[test]
+    fn generate_calc_def_with_return() {
+        let opts = TemplateOptions {
+            kind: DefKind::Calc,
+            name: "BatteryRuntime".to_string(),
+            super_type: None,
+            is_abstract: false,
+            short_name: None,
+            doc: None,
+            members: vec![
+                parse_member_spec("in attribute capacity:Real").unwrap(),
+                parse_member_spec("in attribute consumption:Real").unwrap(),
+                parse_member_spec("return hours:Real").unwrap(),
+            ],
+            exposes: Vec::new(),
+            filter: None,
+            indent: 0,
+        };
+        let result = generate_template(&opts);
+        assert!(result.contains("calc def BatteryRuntime {"));
+        assert!(result.contains("in attribute capacity : Real;"));
+        assert!(result.contains("return hours : Real;"));
+    }
+
+    #[test]
+    fn generate_constraint_def_with_expression() {
+        let opts = TemplateOptions {
+            kind: DefKind::Constraint,
+            name: "TempLimit".to_string(),
+            super_type: None,
+            is_abstract: false,
+            short_name: None,
+            doc: None,
+            members: vec![
+                parse_member_spec("in attribute temp:Real").unwrap(),
+                parse_member_spec("constraint temp >= -40 and temp <= 60").unwrap(),
+            ],
+            exposes: Vec::new(),
+            filter: None,
+            indent: 0,
+        };
+        let result = generate_template(&opts);
+        assert!(result.contains("constraint def TempLimit {"));
+        assert!(result.contains("in attribute temp : Real;"));
+        assert!(result.contains("temp >= -40 and temp <= 60;"));
+    }
+
+    #[test]
+    fn generate_verification_def() {
+        let opts = TemplateOptions {
+            kind: DefKind::Verification,
+            name: "TestTempAccuracy".to_string(),
+            super_type: None,
+            is_abstract: false,
+            short_name: None,
+            doc: Some("Verify temperature accuracy".to_string()),
+            members: vec![
+                parse_member_spec("subject testSubject").unwrap(),
+                parse_member_spec("requirement tempReq:TemperatureAccuracy").unwrap(),
+            ],
+            exposes: Vec::new(),
+            filter: None,
+            indent: 0,
+        };
+        let result = generate_template(&opts);
+        assert!(result.contains("verification def TestTempAccuracy {"));
+        assert!(result.contains("objective {"));
+        assert!(result.contains("doc /* Verify temperature accuracy */"));
+        assert!(result.contains("subject testSubject;"));
+        assert!(result.contains("requirement tempReq : TemperatureAccuracy;"));
+        // Should NOT have a top-level doc comment
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(!lines[1].trim().starts_with("doc"));
+    }
+
+    #[test]
+    fn parse_template_kind_verification() {
+        assert_eq!(parse_template_kind("verification"), Some(DefKind::Verification));
+        assert_eq!(parse_template_kind("verification-def"), Some(DefKind::Verification));
     }
 
     #[test]

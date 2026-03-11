@@ -1,6 +1,6 @@
 # sysml
 
-A fast, standalone SysML v2 command-line toolchain for model validation, simulation, diagram generation, and full product lifecycle management.
+A fast, standalone SysML v2 command-line toolchain for model authoring, validation, simulation, diagram generation, and full product lifecycle management.
 
 Built on [tree-sitter](https://tree-sitter.github.io/) for reliable parsing of SysML v2 textual notation. Zero runtime dependencies — just a single binary.
 
@@ -50,73 +50,199 @@ sysml completions fish > ~/.config/fish/completions/sysml.fish
 
 ## Quick Start
 
+The primary way to use sysml is through its **interactive wizard**. No SysML syntax knowledge required:
+
 ```sh
-sysml lint model.sysml                          # Validate a model
-sysml list model.sysml                          # List all elements
-sysml show model.sysml Vehicle                  # Element details
-sysml diagram -t bdd model.sysml                # Block definition diagram
-sysml diagram -t trace model.sysml              # Traceability diagram
-sysml simulate state-machine model.sysml        # Interactive state machine
-sysml fmt model.sysml                           # Format source
-sysml add --stdout part-def Vehicle             # Generate template to stdout
-sysml add model.sysml part-def Engine           # Insert into file
-sysml add                                       # Interactive wizard
 sysml init                                      # Initialize a project
-sysml risk matrix model.sysml                   # Risk matrix
-sysml tol analyze model.sysml --method rss      # Tolerance stack-up
-sysml bom rollup model.sysml --root Vehicle     # BOM rollup
-sysml quality create --type ncr                 # Create NCR interactively
-sysml report dashboard model.sysml              # Project health
+sysml add                                       # Launch interactive wizard
+sysml add model.sysml                           # Wizard with model-aware suggestions
+```
+
+For automation and scripting, every operation has a flag-based equivalent:
+
+```sh
+sysml add model.sysml part-def Vehicle --doc "A passenger vehicle"
+sysml add model.sysml part engine -t Engine --inside Vehicle
+sysml add model.sysml connection c1 --connect "a.x to b.y" --inside Vehicle
+sysml lint model.sysml
+sysml diagram -t bdd model.sysml
+sysml simulate sm model.sysml -n StationStates -e powerOn,startSensors
 ```
 
 ## Highlights
 
-### Guided model authoring — no SysML syntax required
+### Interactive model authoring — no SysML syntax required
 
-`sysml add` launches a concept-first wizard that speaks domain vocabulary, not grammar rules. Pick what you're building ("a new type: physical component"), give it a name, and the tool generates valid SysML v2:
+`sysml add` launches a guided wizard. Pick what you're building, name it, and the tool generates valid SysML v2:
 
-```sh
-$ sysml add
-? What are you creating?
-  > A new type: physical component or assembly
-? Name: Controller
-? Brief description: Central processing unit for sensor data
-? Extend another type? Sensor
+```
+$ sysml add model.sysml
+Available types: Sensor, Controller, Display, PowerSupply
+? What are you creating? > Part definition (component type)
+? Name: TemperatureSensor
+? Brief description: Measures ambient temperature
+? Extend another type? > Sensor
+? Add members (comma-separated)? status:SensorStatus, range:Real
 
-# Generates:
-part def Controller :> Sensor {
-    doc /* Central processing unit for sensor data */
-}
+Preview:
+  part def TemperatureSensor :> Sensor {
+      doc /* Measures ambient temperature */
+      attribute status : SensorStatus;
+      attribute range : Real;
+  }
+
+Wrote TemperatureSensor to model.sysml
 ```
 
-Power users skip the wizard entirely: `sysml add model.sysml part-def Controller --extends Sensor`
+Power users skip the wizard: `sysml add model.sysml part-def TemperatureSensor --extends Sensor -m "attribute status:SensorStatus,attribute range:Real"`
+
+### Full SysML generation — state machines, actions, constraints, calcs
+
+Generate complete elements with internal structure, not just skeletons:
+
+```sh
+# State machine with states and transitions
+sysml add model.sysml state-def EngineStates \
+    -m "state off,state starting,state running" \
+    -m "transition first off accept startCmd then starting" \
+    -m "transition first starting then running"
+
+# Action with steps and successions
+sysml add model.sysml action-def ReadSensors \
+    -m "action readTemp,action processData,action updateDisplay" \
+    -m "first readTemp then processData" \
+    -m "first processData then updateDisplay"
+
+# Constraint with expression
+sysml add model.sysml constraint-def TempLimit \
+    -m "in attribute temp:Real" \
+    -m "constraint temp >= -40 and temp <= 60"
+
+# Calc with return type
+sysml add model.sysml calc-def BatteryRuntime \
+    -m "in attribute capacity:Real,in attribute consumption:Real" \
+    -m "return hours:Real"
+
+# Verification case with objective
+sysml add model.sysml verification-def TestTempAccuracy \
+    --doc "Verify temperature sensor accuracy" \
+    -m "subject testSubject" \
+    -m "requirement tempReq:TemperatureAccuracy"
+```
 
 ### 10 diagram types, 4 output formats
 
 Generate BDD, IBD, state machine, activity, requirements, package, parametric, traceability, allocation, and use case diagrams — output as Mermaid, PlantUML, Graphviz DOT, or D2:
 
 ```sh
-sysml diagram -t bdd model.sysml                        # block definition diagram
-sysml diagram -t ibd --scope Vehicle model.sysml         # internal block diagram
-sysml diagram -t stm --scope StateMachine -o d2 model.sysml
-sysml diagram -t trace -o plantuml requirements.sysml    # V-model traceability
+sysml diagram -t bdd model.sysml
+sysml diagram -t ibd --scope Vehicle model.sysml
+sysml diagram -t stm --scope EngineStates model.sysml
+sysml diagram -t trace -o plantuml requirements.sysml
+```
+
+**Block Definition Diagram (BDD):**
+
+```mermaid
+classDiagram
+    class Vehicle {
+        <<part def>>
+        +part engine : Engine
+        +part transmission : Transmission
+        +part wheel : Wheel [4]
+        +attribute mass : MassValue
+    }
+    class Engine {
+        <<part def>>
+        +port fuelIn : FuelPort
+        +attribute displacement : VolumeValue
+    }
+    class Transmission {
+        <<part def>>
+        +attribute gearCount : Integer
+    }
+    class Wheel {
+        <<part def>>
+        +attribute diameter : LengthValue
+    }
+    Engine *-- Vehicle : engine
+    Transmission *-- Vehicle : transmission
+    Wheel *-- Vehicle : wheel
+```
+
+**State Machine Diagram:**
+
+```mermaid
+stateDiagram-v2
+    off : off
+    starting : starting
+    running : running
+    stopping : stopping
+    [*] --> off
+    off --> starting : startCmd
+    starting --> running
+    running --> stopping : stopCmd
+    stopping --> off
 ```
 
 ### Simulate state machines and evaluate constraints
 
-Step through state machines interactively or with scripted events. Evaluate constraints and calculations with variable bindings:
-
 ```sh
-$ sysml simulate sm model.sysml -n StationStates -e powerOn,alertTrigger,clearAlert
-State Machine: StationStates
+$ sysml simulate sm model.sysml -n EngineStates -e startCmd,stopCmd
+State Machine: EngineStates
 Initial state: off
-  Step 0: off -- [powerOn]--> initializing
-  Step 1: initializing --> monitoring
-  Step 2: monitoring -- [alertTrigger]--> alerting
-  Step 3: alerting -- [clearAlert]--> monitoring
+  Step 0: off -- [startCmd]--> starting
+  Step 1: starting --> running
+  Step 2: running -- [stopCmd]--> stopping
+  Step 3: stopping --> off
 
 $ sysml simulate eval constraints.sysml -n PowerBudget -b consumption=450
 constraint PowerBudget: satisfied
+```
+
+### Requirements traceability
+
+```sh
+$ sysml trace requirements.sysml model.sysml
+Requirement          Satisfied By         Verified By
+------------------------------------------------------------
+TemperatureAccuracy  TemperatureSensor    TestTempAccuracy
+OperatingRange       WeatherStationUnit   -
+BatteryLife          PowerSupply          TestBatteryLife
+
+Coverage: 3/3 satisfied (100%), 2/3 verified (67%)
+```
+
+### Full lifecycle in one tool
+
+Risk matrices, FMEA, tolerance stack-ups, BOM rollups, supplier RFQs, verification execution, NCR/CAPA/Deviation tracking — all driven from SysML models with domain library types:
+
+```sh
+sysml risk add                                  # Interactive risk creation wizard
+sysml risk matrix model.sysml                   # 5x5 severity/likelihood matrix
+sysml risk fmea model.sysml                     # FMEA worksheet
+
+sysml verify run verification.sysml             # Step-through test execution
+sysml quality create --type ncr                 # NCR wizard → TOML record
+sysml quality rca --source NCR-001 --method fishbone
+
+sysml tol analyze model.sysml --method monte-carlo --iterations 50000
+sysml bom rollup model.sysml --root Vehicle --include-mass --include-cost
+sysml mfg start-lot model.sysml                # Start a production lot
+sysml mfg step                                 # Execute next manufacturing step
+```
+
+All lifecycle records are written as TOML files to `.sysml/records/` for traceability.
+
+### Manufacturing SPC and process capability
+
+```sh
+$ sysml mfg spc --parameter SensorCalibration --values 0.48,0.52,0.50,0.49,0.51,0.50,0.53,0.47
+  Mean: 0.500  Std: 0.019  UCL: 0.557  LCL: 0.443
+  All points within control limits
+
+$ sysml qc capability --usl 10.05 --lsl 9.95 --values 10.01,9.99,10.02,9.98,10.00
+  Cp: 1.67  Cpk: 1.33  Process is capable
 ```
 
 ### Semantic diff — compare models, not text
@@ -128,22 +254,7 @@ $ sysml diff model-v1.sysml model-v2.sysml
   Changed: TemperatureSensor.range_max (line 42 → 45)
 ```
 
-### Manufacturing SPC and process capability
-
-Run statistical process control analysis with control charts, and compute Cp/Cpk capability indices:
-
-```sh
-$ sysml mfg spc --parameter SensorCalibration --values 0.48,0.52,0.50,0.49,0.51,0.50,0.53,0.47
-  Mean: 0.500  Std: 0.019  UCL: 0.557  LCL: 0.443
-  All points within control limits ✓
-
-$ sysml qc capability --usl 10.05 --lsl 9.95 --values 10.01,9.99,10.02,9.98,10.00
-  Cp: 1.67  Cpk: 1.33  Process is capable ✓
-```
-
 ### CI pipelines from config
-
-Define named validation pipelines in `.sysml/config.toml` and run them locally or in CI. Stops at the first failure:
 
 ```toml
 [[pipeline]]
@@ -159,19 +270,6 @@ steps = [
 sysml pipeline run ci
 ```
 
-### Full lifecycle in one tool
-
-Risk matrices, FMEA, tolerance stack-ups (worst-case/RSS/Monte Carlo), BOM rollups, supplier RFQs, verification execution, NCR/CAPA/Deviation tracking — all driven from SysML models with domain library types:
-
-```sh
-sysml risk matrix model.sysml -I libraries/
-sysml tol analyze model.sysml --method monte-carlo --iterations 50000
-sysml bom rollup model.sysml --root Vehicle --include-mass --include-cost
-sysml verify run verification.sysml --case TestAccuracy
-sysml quality create --type ncr          # interactive NCR wizard
-sysml quality rca --source NCR-001 --method fishbone
-```
-
 ### Global Options
 
 | Flag | Description |
@@ -185,6 +283,12 @@ sysml quality rca --source NCR-001 --method fishbone
 
 | Command | Description | Docs |
 |---------|-------------|------|
+| **Editing** | | [editing](docs/commands/editing.md) |
+| `add` | Add elements interactively, to a file, or to stdout | |
+| `remove` | Remove an element from a SysML file | |
+| `rename` | Rename an element and update all references | |
+| `example` | Generate example projects with teaching comments | |
+| `fmt` | Format SysML v2 source files | |
 | **Analysis** | | [analysis](docs/commands/analysis.md) |
 | `lint` | Validate SysML v2 files against structural rules | |
 | `list` (`ls`) | List model elements with filters | |
@@ -199,12 +303,6 @@ sysml quality rca --source NCR-001 --method fishbone
 | `stats` | Aggregate model statistics | |
 | **Diagrams** | | [diagrams](docs/commands/diagrams.md) |
 | `diagram` | Generate diagrams (bdd, ibd, stm, act, req, pkg, par, trace, alloc, ucd) | |
-| **Editing** | | [editing](docs/commands/editing.md) |
-| `add` | Add elements interactively, to a file, or to stdout | |
-| `remove` | Remove an element from a SysML file | |
-| `rename` | Rename an element and update all references | |
-| `example` | Generate example projects with teaching comments | |
-| `fmt` | Format SysML v2 source files | |
 | **Simulation & Export** | | [simulation](docs/commands/simulation.md) |
 | `simulate` | Evaluate constraints, state machines, action flows | |
 | `export` | Export FMI 3.0, Modelica, SSP artifacts | |
@@ -227,7 +325,7 @@ sysml quality rca --source NCR-001 --method fishbone
 
 ## Domain Libraries
 
-The tool ships with SysML v2 domain libraries that provide base types for lifecycle workflows. Users specialize these types in their models — the tool recognizes all specializations automatically.
+The tool ships with SysML v2 domain libraries that provide base types for lifecycle workflows. When `sysml init` detects a `libraries/` directory, it automatically configures it for import resolution — no `-I` flag needed.
 
 | Library | Package | Purpose |
 |---------|---------|---------|
