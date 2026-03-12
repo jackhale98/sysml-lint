@@ -554,3 +554,38 @@ fn parse_vehicle_usages_connections() {
     assert_eq!(ds.source, "transmission.drive");
     assert_eq!(ds.target, "rearAxleAssembly.rearAxle.drive");
 }
+
+#[test]
+fn parse_fork_join_nodes() {
+    let model = parse(r#"
+        action def TransportPassenger {
+            action driverGetIn;
+            action passengerGetIn;
+            fork forkBoard;
+            join joinBoard;
+            first start then forkBoard;
+              then driverGetIn;
+              then passengerGetIn;
+            first driverGetIn then joinBoard;
+            first passengerGetIn then joinBoard;
+        }
+    "#);
+
+    // Should find fork and join nodes
+    let fork = model.usages.iter().find(|u| u.kind == "fork_node" && u.name == "forkBoard");
+    assert!(fork.is_some(), "Should find fork_node 'forkBoard'; usages: {:?}",
+        model.usages.iter().map(|u| format!("{}:{}", u.kind, u.name)).collect::<Vec<_>>());
+
+    let join = model.usages.iter().find(|u| u.kind == "join_node" && u.name == "joinBoard");
+    assert!(join.is_some(), "Should find join_node 'joinBoard'");
+
+    // Should find successions (first X then Y)
+    let succ = model.usages.iter().filter(|u| u.kind == "succession").collect::<Vec<_>>();
+    assert!(succ.len() >= 2, "Should find at least 2 successions; found: {:?}",
+        succ.iter().map(|s| format!("{} -> {}", s.name, s.type_ref.as_deref().unwrap_or("?"))).collect::<Vec<_>>());
+
+    // Should find then_succession branches (then driverGetIn; then passengerGetIn;)
+    let branches = model.usages.iter().filter(|u| u.kind == "then_succession").collect::<Vec<_>>();
+    assert!(branches.len() >= 2, "Should find at least 2 then_succession branches; found: {:?}",
+        branches.iter().map(|b| &b.name).collect::<Vec<_>>());
+}

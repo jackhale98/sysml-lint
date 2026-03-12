@@ -1,3 +1,6 @@
 [submodule "tree-sitter-sysml"]
 	path = tree-sitter-sysml
 	url = https://github.com/jackhale98/tree-sitter-sysml.git
+[submodule "sysml-v2-release"]
+	path = sysml-v2-release
+	url = https://github.com/Systems-Modeling/SysML-v2-Release.git

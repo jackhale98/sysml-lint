@@ -720,6 +720,112 @@ fn walk_node_scoped(
             }
         }
 
+        // --- Control flow nodes (fork, join, merge, decide) ---
+        "fork_node" | "join_node" | "merge_node" | "decide_node" => {
+            let kind = node.kind().to_string(); // e.g. "fork_node"
+            if let Some(name) = field_text(&node, "name", source) {
+                model.usages.push(Usage {
+                    kind,
+                    name,
+                    type_ref: None,
+                    span: Span::from_node(&node),
+                    direction: None,
+                    is_conjugated: false,
+                    parent_def: parent_def_name.map(|s| s.to_string()),
+                    multiplicity: None,
+                    value_expr: None,
+                    short_name: None,
+                    redefinition: None,
+                    subsets: None,
+                    qualified_name: None,
+                });
+            }
+        }
+
+        // --- Succession statement: `first X then Y` ---
+        "succession_statement" => {
+            let mut names: Vec<String> = Vec::new();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "qualified_name" || child.kind() == "identifier" {
+                    names.push(node_text(&child, source).to_string());
+                }
+            }
+            if names.len() >= 2 {
+                // Create a succession usage with source→target in name/type_ref
+                model.usages.push(Usage {
+                    kind: "succession".to_string(),
+                    name: names[0].clone(),
+                    type_ref: Some(names[1].clone()),
+                    span: Span::from_node(&node),
+                    direction: None,
+                    is_conjugated: false,
+                    parent_def: parent_def_name.map(|s| s.to_string()),
+                    multiplicity: None,
+                    value_expr: None,
+                    short_name: None,
+                    redefinition: None,
+                    subsets: None,
+                    qualified_name: None,
+                });
+            }
+            // Check for then_succession children (fork branches: `then X;`)
+            let mut cursor2 = node.walk();
+            for child in node.children(&mut cursor2) {
+                if child.kind() == "then_succession" {
+                    let mut cursor3 = child.walk();
+                    for grandchild in child.children(&mut cursor3) {
+                        if grandchild.kind() == "qualified_name" || grandchild.kind() == "identifier" {
+                            let target = node_text(&grandchild, source).to_string();
+                            model.usages.push(Usage {
+                                kind: "then_succession".to_string(),
+                                name: target,
+                                type_ref: None,
+                                span: Span::from_node(&child),
+                                direction: None,
+                                is_conjugated: false,
+                                parent_def: parent_def_name.map(|s| s.to_string()),
+                                multiplicity: None,
+                                value_expr: None,
+                                short_name: None,
+                                redefinition: None,
+                                subsets: None,
+                                qualified_name: None,
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+            return; // Already handled children
+        }
+
+        // --- Standalone then_succession (outside succession_statement) ---
+        "then_succession" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "qualified_name" || child.kind() == "identifier" {
+                    let target = node_text(&child, source).to_string();
+                    model.usages.push(Usage {
+                        kind: "then_succession".to_string(),
+                        name: target,
+                        type_ref: None,
+                        span: Span::from_node(&node),
+                        direction: None,
+                        is_conjugated: false,
+                        parent_def: parent_def_name.map(|s| s.to_string()),
+                        multiplicity: None,
+                        value_expr: None,
+                        short_name: None,
+                        redefinition: None,
+                        subsets: None,
+                        qualified_name: None,
+                    });
+                    break;
+                }
+            }
+        }
+
         // --- Require statement (verify inside verification) ---
         "require_statement" => {
             if let Some(ver_name) = enclosing_verification {
