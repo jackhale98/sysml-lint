@@ -120,11 +120,36 @@ pub fn simulate(machine: &StateMachineModel, config: &SimConfig) -> SimulationSt
             state = stepped;
         } else {
             // No transition could fire
-            if current_event.is_some() && event_index + 1 < config.events.len() {
-                // Try next event
+            if let Some(evt) = current_event {
+                // Record that this event was ignored (no matching transition)
+                state.trace.push(SimStep {
+                    step: state.step,
+                    from_state: state.current_state.clone(),
+                    transition_name: None,
+                    trigger: Some(evt.to_string()),
+                    guard_result: Some(false),
+                    effect: None,
+                    to_state: state.current_state.clone(),
+                    exit_action: None,
+                    entry_action: None,
+                });
+                state.step += 1;
                 event_index += 1;
+                if event_index >= config.events.len() {
+                    // All events consumed, check for auto-transitions
+                    let auto_stepped = step(machine, &state, None);
+                    if auto_stepped.trace.len() > state.trace.len() {
+                        state = auto_stepped;
+                    } else {
+                        state.status = SimStatus::Completed;
+                    }
+                }
             } else {
-                state.status = SimStatus::Deadlocked;
+                state.status = if state.trace.is_empty() {
+                    SimStatus::Deadlocked
+                } else {
+                    SimStatus::Completed
+                };
             }
         }
     }
