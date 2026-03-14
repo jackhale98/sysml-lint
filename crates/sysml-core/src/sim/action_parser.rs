@@ -1,5 +1,6 @@
 /// Extract action flow models from tree-sitter parse trees.
 
+use std::collections::{HashMap, HashSet};
 use tree_sitter::{Node, Parser};
 
 use crate::model::Span;
@@ -18,8 +19,344 @@ pub fn extract_actions(file: &str, source: &str) -> Vec<ActionModel> {
     let source_bytes = source.as_bytes();
     let mut results = Vec::new();
     collect_action_nodes(tree.root_node(), source_bytes, file, &mut results);
+    // Post-process: build flow graphs from successions for each action
+    for action in &mut results {
+        action.steps = build_flow_graph(std::mem::take(&mut action.steps));
+    }
     results
 }
+
+/// Build a proper flow graph from raw extracted steps.
+///
+/// The parser extracts fork/join declarations, action usages, and successions
+/// as flat lists. This function reconstructs the graph by:
+/// 1. Collecting all named nodes (actions, forks, joins)
+/// 2. Building an adjacency map from succession sequences
+/// 3. Walking from "start" through the graph, nesting fork branches
+fn build_flow_graph(raw_steps: Vec<ActionStep>) -> Vec<ActionStep> {
+    // Collect named nodes: name → step kind
+    let mut node_kinds: HashMap<String, &str> = HashMap::new();
+    let mut fork_spans: HashMap<String, Span> = HashMap::new();
+    let mut join_spans: HashMap<String, Span> = HashMap::new();
+    let mut action_spans: HashMap<String, Span> = HashMap::new();
+    // Non-succession, non-declaration steps (if/while/send/accept etc.)
+    let mut other_steps: Vec<ActionStep> = Vec::new();
+
+    for step in &raw_steps {
+        match step {
+            ActionStep::Fork { name: Some(n), span, .. } => {
+                node_kinds.insert(n.clone(), "fork");
+                fork_spans.insert(n.clone(), span.clone());
+            }
+            ActionStep::Join { name: Some(n), span } => {
+                node_kinds.insert(n.clone(), "join");
+                join_spans.insert(n.clone(), span.clone());
+            }
+            ActionStep::Perform { name, span } => {
+                if name != "start" && name != "done" {
+                    node_kinds.entry(name.clone()).or_insert("action");
+                    action_spans.entry(name.clone()).or_insert_with(|| span.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // If no successions found, return raw steps (simple action)
+    let has_successions = raw_steps.iter().any(|s| matches!(s, ActionStep::Sequence { .. }));
+    if !has_successions {
+        return raw_steps;
+    }
+
+    // Build adjacency: source → [targets]
+    let mut adj: HashMap<String, Vec<String>> = HashMap::new();
+    // Also track standalone then_succession targets (from loose `then X;` after a succession)
+    // These are the Perform steps that aren't in a Sequence and come after successions
+    let mut succession_region = false;
+
+    for step in &raw_steps {
+        match step {
+            ActionStep::Sequence { steps, .. } if steps.len() == 2 => {
+                // `first A then B;` parsed as Sequence [Perform(A), Perform(B)]
+                let src = match &steps[0] {
+                    ActionStep::Perform { name, .. } => name.clone(),
+                    _ => continue,
+                };
+                let tgt = match &steps[1] {
+                    ActionStep::Perform { name, .. } => name.clone(),
+                    _ => continue,
+                };
+                adj.entry(src).or_default().push(tgt);
+                succession_region = true;
+            }
+            ActionStep::Perform { name, .. } if succession_region => {
+                // Loose `then X;` — this is a branch target from the preceding succession's source
+                // Find the last succession source and add this as an additional target
+                // Actually these are `then_succession` parsed as standalone Perform
+                // They belong to the PREVIOUS succession's source
+                if let Some(last_src) = find_last_succession_source(&raw_steps, step) {
+                    adj.entry(last_src).or_default().push(name.clone());
+                }
+            }
+            ActionStep::Fork { .. } | ActionStep::Join { .. } => {
+                // Declarations don't reset succession region
+            }
+            _ => {
+                succession_region = false;
+                // Collect non-flow steps
+                if !matches!(step, ActionStep::Perform { .. }) {
+                    other_steps.push(step.clone());
+                }
+            }
+        }
+    }
+
+    // Walk the graph from "start" or from root nodes (no incoming edges)
+    let mut visited = HashSet::new();
+    let result = if adj.contains_key("start") {
+        walk_graph("start", &adj, &node_kinds, &fork_spans, &join_spans, &action_spans, &mut visited)
+    } else {
+        // No explicit "start" — find root nodes (nodes with no incoming edges)
+        let mut has_incoming: HashSet<String> = HashSet::new();
+        for targets in adj.values() {
+            for t in targets {
+                has_incoming.insert(t.clone());
+            }
+        }
+        let roots: Vec<String> = adj.keys()
+            .filter(|k| !has_incoming.contains(*k))
+            .cloned()
+            .collect();
+        if roots.is_empty() {
+            // All nodes have incoming edges — just walk from first adj key
+            if let Some(first) = adj.keys().next().cloned() {
+                walk_graph(&first, &adj, &node_kinds, &fork_spans, &join_spans, &action_spans, &mut visited)
+            } else {
+                vec![]
+            }
+        } else {
+            let mut result = Vec::new();
+            for root in roots {
+                result.extend(walk_graph(&root, &adj, &node_kinds, &fork_spans, &join_spans, &action_spans, &mut visited));
+            }
+            result
+        }
+    };
+
+    if result.is_empty() {
+        // Fallback: return raw steps if graph walk produced nothing
+        return raw_steps;
+    }
+
+    let mut final_steps = result;
+    // Append non-flow steps (if/while/send/accept that aren't part of the succession graph)
+    final_steps.extend(other_steps);
+    final_steps
+}
+
+fn find_last_succession_source(steps: &[ActionStep], target_step: &ActionStep) -> Option<String> {
+    let target_span = match target_step {
+        ActionStep::Perform { span, .. } => span,
+        _ => return None,
+    };
+    // Find the succession (Sequence) that immediately precedes this step by span position
+    let mut last_src = None;
+    for step in steps {
+        if let ActionStep::Sequence { steps: seq, .. } = step {
+            if seq.len() == 2 {
+                if let ActionStep::Perform { span: seq_span, .. } = &seq[0] {
+                    if seq_span.end_byte < target_span.start_byte {
+                        if let ActionStep::Perform { name, .. } = &seq[0] {
+                            // The source of the succession that feeds into this fork
+                            // But we actually want the TARGET of that succession (the fork name)
+                            if let ActionStep::Perform { name: tgt, .. } = &seq[1] {
+                                last_src = Some(tgt.clone());
+                            } else {
+                                last_src = Some(name.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    last_src
+}
+
+fn walk_graph(
+    node: &str,
+    adj: &HashMap<String, Vec<String>>,
+    node_kinds: &HashMap<String, &str>,
+    fork_spans: &HashMap<String, Span>,
+    join_spans: &HashMap<String, Span>,
+    action_spans: &HashMap<String, Span>,
+    visited: &mut HashSet<String>,
+) -> Vec<ActionStep> {
+    if visited.contains(node) || node == "done" {
+        return vec![];
+    }
+    visited.insert(node.to_string());
+
+    let targets = adj.get(node).cloned().unwrap_or_default();
+
+    let kind = node_kinds.get(node).copied().unwrap_or("action");
+
+    match kind {
+        "fork" => {
+            let span = fork_spans.get(node).cloned().unwrap_or_else(|| Span {
+                start_row: 0, start_col: 0, end_row: 0, end_col: 0, start_byte: 0, end_byte: 0,
+            });
+            // Each target of the fork is a parallel branch
+            // Walk each branch until we hit the matching join
+            let join_name = find_matching_join(node, &targets, adj, node_kinds);
+            let mut branches = Vec::new();
+            for target in &targets {
+                let mut branch_steps = walk_branch(
+                    target, adj, node_kinds, fork_spans, join_spans, action_spans, visited,
+                    join_name.as_deref(),
+                );
+                if branch_steps.len() == 1 {
+                    branches.push(branch_steps.remove(0));
+                } else if !branch_steps.is_empty() {
+                    branches.push(ActionStep::Sequence {
+                        steps: branch_steps,
+                        span: span.clone(),
+                    });
+                }
+            }
+            let mut result = vec![ActionStep::Fork {
+                name: Some(node.to_string()),
+                branches,
+                span,
+            }];
+            // Continue after the join
+            if let Some(ref jn) = join_name {
+                if !visited.contains(jn) {
+                    visited.insert(jn.to_string());
+                    let jspan = join_spans.get(jn).cloned().unwrap_or_else(|| Span {
+                        start_row: 0, start_col: 0, end_row: 0, end_col: 0, start_byte: 0, end_byte: 0,
+                    });
+                    result.push(ActionStep::Join {
+                        name: Some(jn.clone()),
+                        span: jspan,
+                    });
+                    let after_join = adj.get(jn).cloned().unwrap_or_default();
+                    for aj in after_join {
+                        result.extend(walk_graph(&aj, adj, node_kinds, fork_spans, join_spans, action_spans, visited));
+                    }
+                }
+            }
+            result
+        }
+        "join" => {
+            // Encountered join outside of fork walk — just emit it
+            let span = join_spans.get(node).cloned().unwrap_or_else(|| Span {
+                start_row: 0, start_col: 0, end_row: 0, end_col: 0, start_byte: 0, end_byte: 0,
+            });
+            let mut result = vec![ActionStep::Join {
+                name: Some(node.to_string()),
+                span,
+            }];
+            for target in targets {
+                result.extend(walk_graph(&target, adj, node_kinds, fork_spans, join_spans, action_spans, visited));
+            }
+            result
+        }
+        _ => {
+            // Action node
+            let span = action_spans.get(node).cloned().unwrap_or_else(|| Span {
+                start_row: 0, start_col: 0, end_row: 0, end_col: 0, start_byte: 0, end_byte: 0,
+            });
+            let mut result = vec![ActionStep::Perform {
+                name: node.to_string(),
+                span,
+            }];
+            for target in targets {
+                result.extend(walk_graph(&target, adj, node_kinds, fork_spans, join_spans, action_spans, visited));
+            }
+            result
+        }
+    }
+}
+
+fn walk_branch(
+    node: &str,
+    adj: &HashMap<String, Vec<String>>,
+    node_kinds: &HashMap<String, &str>,
+    fork_spans: &HashMap<String, Span>,
+    join_spans: &HashMap<String, Span>,
+    action_spans: &HashMap<String, Span>,
+    visited: &mut HashSet<String>,
+    stop_at_join: Option<&str>,
+) -> Vec<ActionStep> {
+    if visited.contains(node) || node == "done" {
+        return vec![];
+    }
+    if let Some(jn) = stop_at_join {
+        if node == jn {
+            return vec![];
+        }
+    }
+
+    let kind = node_kinds.get(node).copied().unwrap_or("action");
+
+    if kind == "fork" {
+        // Nested fork within a branch
+        return walk_graph(node, adj, node_kinds, fork_spans, join_spans, action_spans, visited);
+    }
+
+    if kind == "join" {
+        // Hit a join — stop this branch
+        return vec![];
+    }
+
+    visited.insert(node.to_string());
+    let span = action_spans.get(node).cloned().unwrap_or_else(|| Span {
+        start_row: 0, start_col: 0, end_row: 0, end_col: 0, start_byte: 0, end_byte: 0,
+    });
+    let mut result = vec![ActionStep::Perform {
+        name: node.to_string(),
+        span,
+    }];
+    let targets = adj.get(node).cloned().unwrap_or_default();
+    for target in targets {
+        result.extend(walk_branch(&target, adj, node_kinds, fork_spans, join_spans, action_spans, visited, stop_at_join));
+    }
+    result
+}
+
+/// Find the join node that corresponds to a fork by tracing branches
+fn find_matching_join(
+    _fork_name: &str,
+    targets: &[String],
+    adj: &HashMap<String, Vec<String>>,
+    node_kinds: &HashMap<String, &str>,
+) -> Option<String> {
+    // Trace from any fork target until we hit a join
+    for target in targets {
+        let mut cur = target.clone();
+        let mut seen = HashSet::new();
+        while !seen.contains(&cur) {
+            seen.insert(cur.clone());
+            let kind = node_kinds.get(&cur).copied().unwrap_or("action");
+            if kind == "join" {
+                return Some(cur);
+            }
+            if let Some(nexts) = adj.get(&cur) {
+                if let Some(next) = nexts.first() {
+                    cur = next.clone();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    None
+}
+
+
 
 fn collect_action_nodes(
     node: Node,
@@ -924,3 +1261,64 @@ mod tests {
         assert!(join.is_some(), "expected Join step, got {:?}", a.steps);
     }
 }
+
+    #[test]
+    fn extract_fork_join_flow_graph() {
+        let source = r#"
+action def TransportPassenger {
+    action driverGetIn;
+    action passengerGetIn;
+    action checkSafety;
+    action driveToDestination;
+    action providePower;
+    action monitorSystems;
+    action driverGetOut;
+    action passengerGetOut;
+
+    fork forkBoard;
+    join joinBoard;
+    fork forkDrive;
+    join joinDrive;
+    fork forkExit;
+    join joinExit;
+
+    first start then forkBoard;
+      then driverGetIn;
+      then passengerGetIn;
+    first driverGetIn then joinBoard;
+    first passengerGetIn then joinBoard;
+
+    first joinBoard then checkSafety;
+    first checkSafety then forkDrive;
+      then driveToDestination;
+      then providePower;
+      then monitorSystems;
+    first driveToDestination then joinDrive;
+    first providePower then joinDrive;
+    first monitorSystems then joinDrive;
+
+    first joinDrive then forkExit;
+      then driverGetOut;
+      then passengerGetOut;
+    first driverGetOut then joinExit;
+    first passengerGetOut then joinExit;
+
+    first joinExit then done;
+}
+"#;
+        let actions = extract_actions("test.sysml", source);
+        assert!(!actions.is_empty(), "should extract action");
+        let a = &actions[0];
+        let forks: Vec<_> = a.steps.iter().filter(|s| matches!(s, ActionStep::Fork { .. })).collect();
+        let joins: Vec<_> = a.steps.iter().filter(|s| matches!(s, ActionStep::Join { .. })).collect();
+        assert_eq!(forks.len(), 3, "expected 3 fork nodes");
+        assert_eq!(joins.len(), 3, "expected 3 join nodes");
+        // First fork should have 2 branches (driverGetIn, passengerGetIn)
+        if let ActionStep::Fork { branches, .. } = &forks[0] {
+            assert_eq!(branches.len(), 2, "forkBoard should have 2 branches");
+        }
+        // Second fork should have 3 branches (driveToDestination, providePower, monitorSystems)
+        if let ActionStep::Fork { branches, .. } = &forks[1] {
+            assert_eq!(branches.len(), 3, "forkDrive should have 3 branches");
+        }
+    }
