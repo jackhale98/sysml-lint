@@ -30,5 +30,5 @@ fn main() {
         .warnings(false)
         .compile("tree-sitter-sysml");
 
-    println!("cargo:rerun-if-changed={}", grammar_dir.display());
+    println!("cargo:rerun-if-changed={}", grammar_dir.join("parser.c").display());
 }
