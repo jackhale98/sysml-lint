@@ -43,6 +43,12 @@ jobs:
       - name: Export smoke test
         run: cargo run -- export list test/fixtures/fmi-vehicle.sysml
 
+      - name: Build LSP
+        run: cargo build -p sysml-lsp
+
+      - name: Test LSP
+        run: cargo test -p sysml-lsp
+
   test-lifecycle:
     name: Full (lifecycle features)
     runs-on: ubuntu-latest

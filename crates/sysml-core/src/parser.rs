@@ -8,7 +8,7 @@ extern "C" {
     fn tree_sitter_sysml() -> Language;
 }
 
-pub(crate) fn get_language() -> Language {
+pub fn get_language() -> Language {
     unsafe { tree_sitter_sysml() }
 }
 

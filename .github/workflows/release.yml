@@ -97,6 +97,24 @@ jobs:
           7z a ../../../${{ matrix.artifact }}-lifecycle.zip sysml-lifecycle.exe
           cd ../../..
 
+      # -- LSP binary (sysml-lsp) --
+      - name: Build LSP release
+        run: cargo build --release --target ${{ matrix.target }} -p sysml-lsp
+
+      - name: Package LSP (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../${{ matrix.artifact }}-lsp.tar.gz sysml-lsp
+          cd ../../..
+
+      - name: Package LSP (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          7z a ../../../${{ matrix.artifact }}-lsp.zip sysml-lsp.exe
+          cd ../../..
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -106,6 +124,8 @@ jobs:
             ${{ matrix.artifact }}.zip
             ${{ matrix.artifact }}-lifecycle.tar.gz
             ${{ matrix.artifact }}-lifecycle.zip
+            ${{ matrix.artifact }}-lsp.tar.gz
+            ${{ matrix.artifact }}-lsp.zip
 
   release:
     needs: build

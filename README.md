@@ -11,8 +11,8 @@ Built on [tree-sitter](https://tree-sitter.github.io/) for reliable parsing of S
 | [Tutorial](docs/tutorial.md) | Build a weather station model from scratch using the CLI |
 | [Validation & Diagnostics](docs/validation.md) | 9 lint checks, diagnostic codes, output formats |
 | [Domain Libraries](docs/domain-libraries.md) | Base types for risk, tolerance, BOM, manufacturing, quality |
-| [Architecture](docs/architecture.md) | Crate structure, design decisions, 12-crate workspace |
-| [CI & Editor Integration](docs/ci-integration.md) | GitHub Actions workflow, Emacs sysml2-mode, JSON output |
+| [Architecture](docs/architecture.md) | Crate structure, design decisions, 13-crate workspace |
+| [CI & Editor Integration](docs/ci-integration.md) | GitHub Actions workflow, LSP setup, Emacs sysml2-mode, JSON output |
 | **Command references** | [Analysis](docs/commands/analysis.md) &#183; [Diagrams](docs/commands/diagrams.md) &#183; [Editing](docs/commands/editing.md) &#183; [Simulation](docs/commands/simulation.md) &#183; [Lifecycle](docs/commands/lifecycle.md) &#183; [Project](docs/commands/project.md) |
 
 ## Installation
@@ -39,6 +39,16 @@ To enable the optional SQLite-backed persistent cache:
 ```sh
 cargo install --path crates/sysml-cli --features sqlite
 ```
+
+### Language server (LSP)
+
+The `sysml-lsp` binary is a full-featured language server for SysML v2. It provides diagnostics, go-to-definition, find references, hover, completions, document outline, workspace symbols, semantic highlighting, quick-fix code actions, formatting, document highlight, folding, and rename for any LSP-compatible editor.
+
+```sh
+cargo install --path crates/sysml-lsp
+```
+
+Or download a prebuilt binary from [GitHub Releases](https://github.com/jackhale98/sysml-cli/releases). See [CI & Editor Integration](docs/ci-integration.md) for VS Code, Neovim, Helix, and Zed setup.
 
 ### Shell completions
 
@@ -322,6 +332,8 @@ sysml pipeline run ci
 | `report` | Cross-domain reports (dashboard, traceability, gate) | |
 | `guide` | Built-in help topics and tutorials | |
 | `completions` | Generate shell completion scripts | |
+| **Language Server** | | [editor setup](docs/ci-integration.md#language-server-sysml-lsp) |
+| `sysml-lsp` | LSP server with 13 capabilities: diagnostics, go-to-def, references, hover, completions, outline, workspace symbols, semantic highlighting, code actions, formatting, document highlight, folding, rename | |
 
 ## Domain Libraries
 

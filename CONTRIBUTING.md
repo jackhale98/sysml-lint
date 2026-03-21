@@ -6,6 +6,7 @@
 crates/
   sysml-core/      Core library (parser, model, checks, sim, export, codegen)
   sysml-cli/       CLI frontend (clap commands, output formatting)
+  sysml-lsp/       Language server (diagnostics, go-to-def, hover, completions, outline)
 tree-sitter-sysml/ Grammar (git submodule)
 test/fixtures/     SysML v2 test files
 ```
@@ -81,6 +82,7 @@ pub fn all_checks() -> Vec<Box<dyn Check>> {
 cargo test                   # All tests (unit + integration + CLI)
 cargo test -p sysml-core     # Core library tests only
 cargo test -p sysml-cli      # CLI integration tests only
+cargo test -p sysml-lsp      # Language server tests only
 cargo test -- --nocapture    # With stdout/stderr output
 ```
 

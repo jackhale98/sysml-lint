@@ -50,6 +50,114 @@ jobs:
 
 ## Editor Integration
 
+### Language Server (`sysml-lsp`)
+
+`sysml-lsp` is a full-featured language server for SysML v2 files with 13 capabilities. Install from source or download a prebuilt binary from [GitHub Releases](https://github.com/jackhale98/sysml-cli/releases).
+
+```sh
+cargo install --path crates/sysml-lsp
+```
+
+#### VS Code
+
+Install a generic LSP client extension (e.g., [vscode-languageclient](https://github.com/ArturoManzoli/generic-lsp-client) or create a minimal extension), then configure it to launch `sysml-lsp` via stdio for `.sysml` and `.kerml` files:
+
+```jsonc
+// settings.json
+{
+  "sysml.lsp.path": "sysml-lsp"
+}
+```
+
+Or with the generic LSP client:
+
+```jsonc
+{
+  "genericLSP.serverCommand": "sysml-lsp",
+  "genericLSP.languageId": "sysml",
+  "genericLSP.fileExtensions": [".sysml", ".kerml"]
+}
+```
+
+#### Neovim
+
+```lua
+-- init.lua or ftplugin/sysml.lua
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'sysml' },
+  callback = function()
+    vim.lsp.start({
+      name = 'sysml-lsp',
+      cmd = { 'sysml-lsp' },
+      root_dir = vim.fs.dirname(vim.fs.find({ '.sysml', '.git' }, { upward = true })[1]),
+    })
+  end,
+})
+```
+
+Add filetype detection if needed:
+
+```lua
+vim.filetype.add({
+  extension = {
+    sysml = 'sysml',
+    kerml = 'sysml',
+  },
+})
+```
+
+#### Helix
+
+Add to `~/.config/helix/languages.toml`:
+
+```toml
+[[language]]
+name = "sysml"
+scope = "source.sysml"
+file-types = ["sysml", "kerml"]
+language-servers = ["sysml-lsp"]
+
+[language-server.sysml-lsp]
+command = "sysml-lsp"
+```
+
+#### Zed
+
+Add to Zed settings (`settings.json`):
+
+```jsonc
+{
+  "lsp": {
+    "sysml-lsp": {
+      "binary": { "path": "sysml-lsp" }
+    }
+  },
+  "languages": {
+    "SysML": {
+      "language_servers": ["sysml-lsp"]
+    }
+  }
+}
+```
+
+#### Capabilities
+
+| Feature | Description |
+|---------|-------------|
+| Diagnostics | 9 lint checks with error codes, severity, suggestions — published on open/change |
+| Document symbols | Hierarchical outline (definitions as containers, usages as children) |
+| Go-to-definition | In-file and cross-file navigation via workspace definition index |
+| Find references | All references to a name across open files (type refs, supertypes, connections, flows) |
+| Hover | Markdown with kind, name, supertype, doc comment, member list |
+| Completions | Current file defs + workspace defs + standard library names |
+| Workspace symbols | Filter all workspace definitions by query (Ctrl+T / `#` in VS Code) |
+| Semantic tokens | Full syntax highlighting via tree-sitter queries (keywords, types, variables, comments, operators) |
+| Code actions | Quick-fix for typo suggestions and remove unused definitions (lightbulb / Ctrl+.) |
+| Formatting | CST-aware document formatting respecting editor tab size (preserves comments) |
+| Document highlight | Highlight all occurrences of the symbol under cursor |
+| Folding ranges | Fold definition blocks and multi-line doc comments |
+| Rename | Cross-file symbol rename with word-boundary matching (F2) |
+
 ### Emacs (sysml2-mode)
 
 `sysml` integrates with [sysml2-mode](https://github.com/jackhale98/sysml2-mode) for Flymake diagnostics, interactive simulation, and FMI export. With `sysml` on your `$PATH`:

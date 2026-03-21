@@ -1,0 +1,636 @@
+use std::path::PathBuf;
+
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::*;
+use tower_lsp::{Client, LanguageServer};
+
+use sysml_core::model::qualify_model;
+use sysml_core::parser;
+
+use crate::code_actions;
+use crate::completion;
+use crate::convert::span_to_range;
+use crate::diagnostics;
+use crate::document_highlight;
+use crate::document_symbols;
+use crate::folding;
+use crate::formatting;
+use crate::goto_definition;
+use crate::hover;
+use crate::references;
+use crate::rename;
+use crate::semantic_tokens as sem_tok;
+use crate::state::{FileState, WorldState};
+use crate::workspace_symbols;
+
+pub struct SysmlLanguageServer {
+    client: Client,
+    state: WorldState,
+}
+
+impl SysmlLanguageServer {
+    pub fn new(client: Client) -> Self {
+        Self {
+            client,
+            state: WorldState::new(),
+        }
+    }
+
+    fn workspace_def_names(&self) -> Vec<String> {
+        self.state
+            .workspace_defs
+            .iter()
+            .map(|entry| entry.value().name.clone())
+            .collect()
+    }
+
+    async fn on_change(&self, uri: Url, text: String, version: i32) {
+        let uri_str = uri.to_string();
+        let mut model = parser::parse_file(&uri_str, &text);
+        qualify_model(&mut model);
+
+        // Update index first so workspace names are current
+        self.state.index_model_defs(&uri_str, &model);
+
+        // Compute diagnostics with cross-file awareness
+        let workspace_names = self.workspace_def_names();
+        let diags = diagnostics::compute_diagnostics(&model, &workspace_names);
+        self.state.files.insert(
+            uri_str,
+            FileState {
+                source: text,
+                model,
+                version,
+            },
+        );
+
+        // Publish diagnostics
+        self.client
+            .publish_diagnostics(uri, diags, Some(version))
+            .await;
+    }
+
+    fn scan_workspace(&self, root: &PathBuf) {
+        let mut files = Vec::new();
+        collect_sysml_files(root, &mut files);
+        for path in files {
+            let path_str = path.to_string_lossy().to_string();
+            if let Ok(source) = std::fs::read_to_string(&path) {
+                let uri = Url::from_file_path(&path)
+                    .unwrap_or_else(|_| Url::parse(&format!("file://{}", path_str)).unwrap());
+                let uri_str = uri.to_string();
+                let mut model = parser::parse_file(&path_str, &source);
+                qualify_model(&mut model);
+                self.state.index_model_defs(&uri_str, &model);
+            }
+        }
+    }
+}
+
+fn collect_sysml_files(dir: &PathBuf, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_sysml_files(&path, files);
+        } else if let Some(ext) = path.extension() {
+            if ext == "sysml" || ext == "kerml" {
+                files.push(path);
+            }
+        }
+    }
+}
+
+#[tower_lsp::async_trait]
+impl LanguageServer for SysmlLanguageServer {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Discover workspace root
+        if let Some(root_uri) = params.root_uri {
+            if let Ok(root_path) = root_uri.to_file_path() {
+                self.scan_workspace(&root_path);
+            }
+        }
+
+        Ok(InitializeResult {
+            capabilities: ServerCapabilities {
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                    TextDocumentSyncKind::FULL,
+                )),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![":".to_string(), ".".to_string()]),
+                    ..Default::default()
+                }),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: sem_tok::legend(),
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: None,
+                            ..Default::default()
+                        },
+                    ),
+                ),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
+                document_highlight_provider: Some(OneOf::Left(true)),
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
+                ..Default::default()
+            },
+            server_info: Some(ServerInfo {
+                name: "sysml-lsp".to_string(),
+                version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            }),
+        })
+    }
+
+    async fn initialized(&self, _: InitializedParams) {
+        tracing::info!("sysml-lsp initialized");
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let doc = params.text_document;
+        self.on_change(doc.uri, doc.text, doc.version).await;
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let version = params.text_document.version;
+        // FULL sync: last content change has the full text
+        if let Some(change) = params.content_changes.into_iter().last() {
+            self.on_change(uri, change.text, version).await;
+        }
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let uri_str = uri.to_string();
+
+        if let Some(file_state) = self.state.files.get(&uri_str) {
+            let workspace_names = self.workspace_def_names();
+            let diags = diagnostics::compute_diagnostics(&file_state.model, &workspace_names);
+            self.client
+                .publish_diagnostics(uri, diags, Some(file_state.version))
+                .await;
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri_str = params.text_document.uri.to_string();
+        self.state.files.remove(&uri_str);
+        self.client
+            .publish_diagnostics(params.text_document.uri, vec![], None)
+            .await;
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri_str = params.text_document.uri.to_string();
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+        let symbols = document_symbols::document_symbols(&file_state.model);
+        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let uri_str = uri.to_string();
+
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let Some(offset) =
+            crate::convert::position_to_offset(&file_state.source, &pos)
+        else {
+            return Ok(None);
+        };
+
+        let Some(name) = goto_definition::find_identifier_at_offset(
+            &file_state.model,
+            &file_state.source,
+            offset,
+        ) else {
+            return Ok(None);
+        };
+
+        let Some((target_uri, span)) =
+            goto_definition::goto_definition(&file_state.model, &name, &uri_str, &self.state)
+        else {
+            return Ok(None);
+        };
+
+        let target_url = if target_uri == uri_str {
+            uri
+        } else {
+            Url::parse(&target_uri).unwrap_or(uri)
+        };
+
+        Ok(Some(GotoDefinitionResponse::Scalar(Location {
+            uri: target_url,
+            range: span_to_range(&span),
+        })))
+    }
+
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+        let uri_str = uri.to_string();
+        let include_declaration = params.context.include_declaration;
+
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let Some(offset) =
+            crate::convert::position_to_offset(&file_state.source, &pos)
+        else {
+            return Ok(None);
+        };
+
+        // Find the identifier at cursor
+        let name = goto_definition::find_identifier_at_offset(
+            &file_state.model,
+            &file_state.source,
+            offset,
+        )
+        .or_else(|| {
+            find_element_name_at_offset(&file_state.model, &file_state.source, offset)
+        });
+
+        let Some(name) = name else {
+            return Ok(None);
+        };
+
+        // Collect all open file models
+        let models: Vec<_> = self
+            .state
+            .files
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.key().clone()))
+            .collect();
+
+        let mut all_refs = Vec::new();
+        for (uri_key, _) in &models {
+            if let Some(fs) = self.state.files.get(uri_key) {
+                let file_refs =
+                    references::find_references_in_model(&fs.model, uri_key, &name);
+                for r in file_refs {
+                    if let Ok(loc_uri) = Url::parse(&r.uri) {
+                        all_refs.push(Location {
+                            uri: loc_uri,
+                            range: span_to_range(&r.span),
+                        });
+                    }
+                }
+
+                // Include declaration if requested
+                if include_declaration {
+                    if let Some(def) = fs.model.find_def(sysml_core::model::simple_name(&name)) {
+                        if let Ok(loc_uri) = Url::parse(uri_key) {
+                            all_refs.push(Location {
+                                uri: loc_uri,
+                                range: span_to_range(&def.span),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if all_refs.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(all_refs))
+        }
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let uri_str = uri.to_string();
+
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let Some(offset) =
+            crate::convert::position_to_offset(&file_state.source, &pos)
+        else {
+            return Ok(None);
+        };
+
+        let name = goto_definition::find_identifier_at_offset(
+            &file_state.model,
+            &file_state.source,
+            offset,
+        );
+
+        let markdown = if let Some(ref name) = name {
+            hover::hover_info(&file_state.model, name)
+                .or_else(|| hover::hover_usage_info(&file_state.model, name))
+        } else {
+            find_element_name_at_offset(&file_state.model, &file_state.source, offset)
+                .and_then(|n| {
+                    hover::hover_info(&file_state.model, &n)
+                        .or_else(|| hover::hover_usage_info(&file_state.model, &n))
+                })
+        };
+
+        let Some(markdown) = markdown else {
+            return Ok(None);
+        };
+
+        Ok(Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: markdown,
+            }),
+            range: None,
+        }))
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri_str = params.text_document_position.text_document.uri.to_string();
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let workspace_defs: Vec<_> = self
+            .state
+            .workspace_defs
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect();
+
+        let items = completion::completions(&file_state.model, &workspace_defs);
+        Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let defs: Vec<_> = self
+            .state
+            .workspace_defs
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect();
+
+        let symbols = workspace_symbols::workspace_symbols(&params.query, &defs);
+        if symbols.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(symbols))
+        }
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri_str = params.text_document.uri.to_string();
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let tokens = sem_tok::semantic_tokens(&file_state.source);
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: tokens,
+        })))
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        let uri_str = uri.to_string();
+        let source = self
+            .state
+            .files
+            .get(&uri_str)
+            .map(|fs| fs.source.clone());
+        let actions = code_actions::code_actions(
+            &uri,
+            &params.context.diagnostics,
+            source.as_deref(),
+        );
+        if actions.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(
+                actions.into_iter().map(CodeActionOrCommand::CodeAction).collect(),
+            ))
+        }
+    }
+
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri_str = params.text_document.uri.to_string();
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        Ok(formatting::format_document(&file_state.source, Some(&params.options)))
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let uri_str = uri.to_string();
+
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let Some(offset) =
+            crate::convert::position_to_offset(&file_state.source, &pos)
+        else {
+            return Ok(None);
+        };
+
+        let name = goto_definition::find_identifier_at_offset(
+            &file_state.model,
+            &file_state.source,
+            offset,
+        )
+        .or_else(|| {
+            find_element_name_at_offset(&file_state.model, &file_state.source, offset)
+        });
+
+        let Some(name) = name else {
+            return Ok(None);
+        };
+
+        let highlights = document_highlight::document_highlights(&file_state.model, &name);
+        if highlights.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(highlights))
+        }
+    }
+
+    async fn folding_range(
+        &self,
+        params: FoldingRangeParams,
+    ) -> Result<Option<Vec<FoldingRange>>> {
+        let uri_str = params.text_document.uri.to_string();
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let ranges = folding::folding_ranges(&file_state.model);
+        if ranges.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(ranges))
+        }
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri_str = params.text_document.uri.to_string();
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let Some(offset) =
+            crate::convert::position_to_offset(&file_state.source, &params.position)
+        else {
+            return Ok(None);
+        };
+
+        let Some((name, range)) =
+            rename::prepare_rename(&file_state.model, &file_state.source, offset)
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+            range,
+            placeholder: name,
+        }))
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+        let uri_str = uri.to_string();
+        let new_name = params.new_name;
+
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let Some(offset) =
+            crate::convert::position_to_offset(&file_state.source, &pos)
+        else {
+            return Ok(None);
+        };
+
+        // Find the name to rename
+        let name = goto_definition::find_identifier_at_offset(
+            &file_state.model,
+            &file_state.source,
+            offset,
+        )
+        .or_else(|| {
+            find_element_name_at_offset(&file_state.model, &file_state.source, offset)
+        });
+
+        let Some(old_name) = name else {
+            return Ok(None);
+        };
+
+        // Collect all open files
+        // We need to drop the DashMap ref before iterating
+        let file_keys: Vec<String> = self
+            .state
+            .files
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect();
+
+        let mut models_data: Vec<(String, String, sysml_core::model::Model)> = Vec::new();
+        for key in &file_keys {
+            if let Some(fs) = self.state.files.get(key) {
+                models_data.push((key.clone(), fs.source.clone(), fs.model.clone()));
+            }
+        }
+
+        let models_refs: Vec<(&str, &str, &sysml_core::model::Model)> = models_data
+            .iter()
+            .map(|(uri, src, model)| (uri.as_str(), src.as_str(), model))
+            .collect();
+
+        Ok(rename::rename_symbol(&models_refs, &old_name, &new_name))
+    }
+}
+
+/// Try to find a definition or usage name at the given byte offset
+/// (for hovering on the name itself, not a reference).
+fn find_element_name_at_offset(
+    model: &sysml_core::model::Model,
+    source: &str,
+    offset: usize,
+) -> Option<String> {
+    for def in &model.definitions {
+        if def.span.start_byte <= offset && offset < def.span.end_byte {
+            let def_text = &source[def.span.start_byte..def.span.end_byte];
+            if let Some(pos) = def_text.find(&def.name) {
+                let abs_start = def.span.start_byte + pos;
+                let abs_end = abs_start + def.name.len();
+                if abs_start <= offset && offset < abs_end {
+                    return Some(def.name.clone());
+                }
+            }
+        }
+    }
+    for usage in &model.usages {
+        if usage.span.start_byte <= offset && offset < usage.span.end_byte {
+            let usage_text = &source[usage.span.start_byte..usage.span.end_byte];
+            if let Some(pos) = usage_text.find(&usage.name) {
+                let abs_start = usage.span.start_byte + pos;
+                let abs_end = abs_start + usage.name.len();
+                if abs_start <= offset && offset < abs_end {
+                    return Some(usage.name.clone());
+                }
+            }
+        }
+    }
+    None
+}
