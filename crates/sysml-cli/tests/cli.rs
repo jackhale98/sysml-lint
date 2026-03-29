@@ -942,3 +942,70 @@ fn rollup_unknown_method() {
         .failure()
         .stderr(predicate::str::contains("unknown aggregation"));
 }
+
+// ========================================================================
+// analyze
+// ========================================================================
+
+#[test]
+fn analyze_list() {
+    cmd()
+        .args(["analyze", "list", &fixture("analysis-trade.sysml")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("FuelAnalysis"))
+        .stdout(predicate::str::contains("EngineTradeOff"));
+}
+
+#[test]
+fn analyze_list_json() {
+    cmd()
+        .args(["-f", "json", "analyze", "list", &fixture("analysis-trade.sysml")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"FuelAnalysis\""));
+}
+
+#[test]
+fn analyze_run() {
+    cmd()
+        .args(["analyze", "run", &fixture("analysis-trade.sysml"),
+               "-n", "FuelAnalysis"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Subject: vehicle"))
+        .stdout(predicate::str::contains("Return: fuelEconomy"));
+}
+
+#[test]
+fn analyze_trade() {
+    cmd()
+        .args(["analyze", "trade", &fixture("analysis-trade.sysml"),
+               "-n", "EngineTradeOff"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Trade Study"))
+        .stdout(predicate::str::contains("Maximize"))
+        .stdout(predicate::str::contains("engine4cyl"))
+        .stdout(predicate::str::contains("engine6cyl"));
+}
+
+#[test]
+fn analyze_trade_no_alternatives() {
+    cmd()
+        .args(["analyze", "trade", &fixture("analysis-trade.sysml"),
+               "-n", "FuelAnalysis"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no alternatives"));
+}
+
+#[test]
+fn analyze_unknown_name() {
+    cmd()
+        .args(["analyze", "run", &fixture("analysis-trade.sysml"),
+               "-n", "NonExistent"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}

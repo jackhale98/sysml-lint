@@ -4,6 +4,7 @@
 /// evaluation, state machine simulation, and action flow execution.
 
 pub mod action_exec;
+pub mod analysis;
 pub mod action_flow;
 pub mod action_parser;
 pub mod constraint_eval;

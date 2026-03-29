@@ -585,6 +585,21 @@ pub(crate) enum Command {
         /// Topic to display (omit to list all topics).
         topic: Option<String>,
     },
+    /// Run analysis cases defined in SysML v2 models.
+    ///
+    /// Lists, executes, and compares analysis cases. Supports trade studies
+    /// with maximize/minimize objectives and parametric sweeps.
+    ///
+    /// SUBCOMMANDS: list, run, trade
+    ///
+    /// EXAMPLES:
+    ///   sysml analyze list model.sysml
+    ///   sysml analyze run model.sysml -n FuelEconomyAnalysis
+    ///   sysml analyze trade model.sysml -n EngineTradeOff
+    Analyze {
+        #[command(subcommand)]
+        kind: AnalyzeCommand,
+    },
     /// Compute attribute rollups over the part hierarchy.
     ///
     /// Walks the composition tree starting from a root definition,
@@ -852,5 +867,47 @@ pub(crate) enum RollupCommand {
         /// Attribute name to search for.
         #[arg(long, required = true)]
         attr: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum AnalyzeCommand {
+    /// List analysis cases found in model files.
+    ///
+    /// EXAMPLES:
+    ///   sysml analyze list model.sysml
+    List {
+        /// SysML v2 files to inspect.
+        files: Vec<PathBuf>,
+    },
+    /// Execute an analysis case with the model's current values.
+    ///
+    /// Binds the subject to its default and evaluates the return expression.
+    ///
+    /// EXAMPLES:
+    ///   sysml analyze run model.sysml -n FuelEconomyAnalysis
+    ///   sysml analyze run model.sysml -n MassAnalysis -b mass=500
+    Run {
+        /// SysML v2 files.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Analysis case name.
+        #[arg(short = 'n', long)]
+        name: Option<String>,
+        /// Variable bindings: name=value.
+        #[arg(short = 'b', long = "bind", value_delimiter = ',')]
+        bindings: Vec<String>,
+    },
+    /// Compare alternatives in a trade study analysis case.
+    ///
+    /// EXAMPLES:
+    ///   sysml analyze trade model.sysml -n EngineTradeOff
+    Trade {
+        /// SysML v2 files.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Analysis case name.
+        #[arg(short = 'n', long)]
+        name: Option<String>,
     },
 }

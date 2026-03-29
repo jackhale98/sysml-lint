@@ -1110,6 +1110,66 @@ fn walk_node_scoped(
             }
         }
 
+        // --- Subject, objective, actor declarations (analysis/use-case bodies) ---
+        "subject_declaration" | "objective_declaration" | "actor_declaration"
+        | "stakeholder_declaration" | "frame_statement" => {
+            let decl_kind = match kind {
+                "subject_declaration" => "subject",
+                "objective_declaration" => "objective",
+                "actor_declaration" => "actor",
+                "stakeholder_declaration" => "stakeholder",
+                "frame_statement" => "frame",
+                _ => "unknown",
+            };
+            let name = field_text(&node, "name", source).unwrap_or_default();
+            let type_ref = get_type_ref(&node, source);
+            let value_expr = get_value_expr(&node, source);
+            model.usages.push(Usage {
+                kind: decl_kind.to_string(),
+                name,
+                type_ref,
+                span: Span::from_node(&node),
+                direction: None,
+                is_conjugated: false,
+                parent_def: parent_def_name.map(|s| s.to_string()),
+                multiplicity: get_multiplicity(&node, source),
+                value_expr,
+                short_name: None,
+                redefinition: None,
+                subsets: None,
+                qualified_name: None,
+            });
+            // Recurse into body for nested elements
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                walk_node_scoped(child, source, model, enclosing_verification, parent_def_name);
+            }
+            return;
+        }
+
+        // --- Return statement ---
+        "return_statement" => {
+            // Extract return name and type
+            let name = field_text(&node, "name", source).unwrap_or_else(|| "return".to_string());
+            let type_ref = get_type_ref(&node, source);
+            let value_expr = get_value_expr(&node, source);
+            model.usages.push(Usage {
+                kind: "return".to_string(),
+                name,
+                type_ref,
+                span: Span::from_node(&node),
+                direction: None,
+                is_conjugated: false,
+                parent_def: parent_def_name.map(|s| s.to_string()),
+                multiplicity: None,
+                value_expr,
+                short_name: None,
+                redefinition: None,
+                subsets: None,
+                qualified_name: None,
+            });
+        }
+
         // --- Succession statement: `first X then Y` ---
         "succession_statement" => {
             let mut names: Vec<String> = Vec::new();

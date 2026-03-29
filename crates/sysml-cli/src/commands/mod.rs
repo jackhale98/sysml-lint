@@ -1,4 +1,5 @@
 pub mod add;
+pub mod analyze;
 pub mod check;
 pub mod list;
 pub mod pipeline;
