@@ -59,8 +59,23 @@ pub fn extract_constraints(file: &str, source: &str) -> Vec<ConstraintModel> {
     results
 }
 
+fn is_definition_of(node: &Node, source: &[u8], keyword: &str) -> bool {
+    if node.kind() == "definition" {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if !child.is_named() && node_text(&child, source) == keyword {
+                return true;
+            }
+            if !child.is_named() && node_text(&child, source) == "def" {
+                break;
+            }
+        }
+    }
+    false
+}
+
 fn collect_constraints(node: Node, source: &[u8], file: &str, results: &mut Vec<ConstraintModel>) {
-    if node.kind() == "constraint_definition" {
+    if node.kind() == "constraint_definition" || is_definition_of(&node, source, "constraint") {
         if let Some(name_node) = node.child_by_field_name("name") {
             let name = node_text(&name_node, source).to_string();
             let mut params = Vec::new();
@@ -133,7 +148,7 @@ pub fn extract_calculations(file: &str, source: &str) -> Vec<CalcModel> {
 }
 
 fn collect_calculations(node: Node, source: &[u8], file: &str, results: &mut Vec<CalcModel>) {
-    if node.kind() == "calc_definition" {
+    if node.kind() == "calc_definition" || is_definition_of(&node, source, "calc") {
         if let Some(name_node) = node.child_by_field_name("name") {
             let name = node_text(&name_node, source).to_string();
             let mut params = Vec::new();

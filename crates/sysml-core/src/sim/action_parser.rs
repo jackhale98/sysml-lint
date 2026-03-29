@@ -364,8 +364,17 @@ fn collect_action_nodes(
     _file: &str,
     results: &mut Vec<ActionModel>,
 ) {
+    // Check for unified "definition" node with "action" keyword
+    let is_action_def = node.kind() == "action_definition"
+        || (node.kind() == "definition" && {
+            let mut c = node.walk();
+            let found = node.children(&mut c)
+                .any(|ch| !ch.is_named() && crate::parser::node_text(&ch, source) == "action");
+            found
+        });
+
     match node.kind() {
-        "action_definition" => {
+        _ if is_action_def => {
             if let Some(name_node) = node.child_by_field_name("name") {
                 let name = node_text(&name_node, source).to_string();
                 let mut steps = Vec::new();
@@ -517,50 +526,71 @@ fn extract_step(node: &Node, source: &[u8]) -> Option<ActionStep> {
         }
         "then_succession" => extract_then_succession(node, source),
         "succession_statement" => extract_succession_statement(node, source),
-        "fork_node" => {
-            let name = node
-                .child_by_field_name("name")
-                .map(|n| node_text(&n, source).to_string());
-            let mut branches = Vec::new();
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "definition_body" {
-                    extract_action_body(&child, source, &mut branches);
+        "fork_node" | "join_node" | "merge_node" | "decide_node" | "control_node" => {
+            // Determine which kind of control node this is
+            let ctrl_keyword = if node.kind() == "control_node" {
+                let mut c = node.walk();
+                let mut kw = "fork";
+                for ch in node.children(&mut c) {
+                    if !ch.is_named() {
+                        match node_text(&ch, source) {
+                            "fork" | "join" | "merge" | "decide" => {
+                                kw = match node_text(&ch, source) {
+                                    "fork" => "fork",
+                                    "join" => "join",
+                                    "merge" => "merge",
+                                    "decide" => "decide",
+                                    _ => "fork",
+                                };
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
                 }
+                kw
+            } else {
+                match node.kind() {
+                    "fork_node" => "fork",
+                    "join_node" => "join",
+                    "merge_node" => "merge",
+                    "decide_node" => "decide",
+                    _ => "fork",
+                }
+            };
+            let name = node
+                .child_by_field_name("name")
+                .map(|n| node_text(&n, source).to_string());
+            match ctrl_keyword {
+                "fork" => {
+                    let mut branches = Vec::new();
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "definition_body" {
+                            extract_action_body(&child, source, &mut branches);
+                        }
+                    }
+                    Some(ActionStep::Fork {
+                        name,
+                        branches,
+                        span: Span::from_node(node),
+                    })
+                }
+                "join" => Some(ActionStep::Join {
+                    name,
+                    span: Span::from_node(node),
+                }),
+                "decide" => Some(ActionStep::Decide {
+                    name,
+                    branches: Vec::new(),
+                    span: Span::from_node(node),
+                }),
+                "merge" => Some(ActionStep::Merge {
+                    name,
+                    span: Span::from_node(node),
+                }),
+                _ => None,
             }
-            Some(ActionStep::Fork {
-                name,
-                branches,
-                span: Span::from_node(node),
-            })
-        }
-        "join_node" => {
-            let name = node
-                .child_by_field_name("name")
-                .map(|n| node_text(&n, source).to_string());
-            Some(ActionStep::Join {
-                name,
-                span: Span::from_node(node),
-            })
-        }
-        "decide_node" => {
-            let name = node
-                .child_by_field_name("name")
-                .map(|n| node_text(&n, source).to_string());
-            Some(ActionStep::Decide {
-                name,
-                branches: Vec::new(),
-                span: Span::from_node(node),
-            })
-        }
-        "merge_node" => {
-            let name = node
-                .child_by_field_name("name")
-                .map(|n| node_text(&n, source).to_string());
-            Some(ActionStep::Merge {
-                name,
-                span: Span::from_node(node),
-            })
         }
         "if_action" => extract_if_action(node, source),
         "assign_action" => extract_assign_action(node, source),

@@ -116,91 +116,206 @@ fn get_type_ref(node: &Node, source: &[u8]) -> Option<String> {
     get_supertype(node, source)
 }
 
-/// Map grammar rule name to DefKind.
-fn def_kind_from_node(kind: &str) -> Option<DefKind> {
-    match kind {
-        "part_definition" => Some(DefKind::Part),
-        "port_definition" => Some(DefKind::Port),
-        "connection_definition" => Some(DefKind::Connection),
-        "interface_definition" => Some(DefKind::Interface),
-        "flow_definition" => Some(DefKind::Flow),
-        "action_definition" => Some(DefKind::Action),
-        "state_definition" => Some(DefKind::State),
-        "constraint_definition" => Some(DefKind::Constraint),
-        "calc_definition" => Some(DefKind::Calc),
-        "requirement_definition" => Some(DefKind::Requirement),
-        "use_case_definition" => Some(DefKind::UseCase),
-        "verification_definition" => Some(DefKind::Verification),
-        "analysis_definition" => Some(DefKind::Analysis),
-        "concern_definition" => Some(DefKind::Concern),
-        "view_definition" => Some(DefKind::View),
-        "viewpoint_definition" => Some(DefKind::Viewpoint),
-        "rendering_definition" => Some(DefKind::Rendering),
-        "enum_definition" | "enumeration_definition" => Some(DefKind::Enum),
-        "attribute_definition" => Some(DefKind::Attribute),
-        "item_definition" => Some(DefKind::Item),
-        "allocation_definition" => Some(DefKind::Allocation),
-        "occurrence_definition" => Some(DefKind::Occurrence),
-        "package_declaration" => Some(DefKind::Package),
+/// Map a keyword string to DefKind.
+fn def_kind_from_keyword(keyword: &str) -> Option<DefKind> {
+    match keyword {
+        "part" => Some(DefKind::Part),
+        "port" => Some(DefKind::Port),
+        "connection" => Some(DefKind::Connection),
+        "interface" => Some(DefKind::Interface),
+        "flow" => Some(DefKind::Flow),
+        "action" => Some(DefKind::Action),
+        "state" => Some(DefKind::State),
+        "constraint" => Some(DefKind::Constraint),
+        "calc" => Some(DefKind::Calc),
+        "requirement" => Some(DefKind::Requirement),
+        "use" => Some(DefKind::UseCase),       // "use case def"
+        "verification" => Some(DefKind::Verification),
+        "analysis" => Some(DefKind::Analysis),
+        "concern" => Some(DefKind::Concern),
+        "view" => Some(DefKind::View),
+        "viewpoint" => Some(DefKind::Viewpoint),
+        "rendering" => Some(DefKind::Rendering),
+        "enum" | "enumeration" => Some(DefKind::Enum),
+        "attribute" => Some(DefKind::Attribute),
+        "item" => Some(DefKind::Item),
+        "allocation" => Some(DefKind::Allocation),
+        "occurrence" => Some(DefKind::Occurrence),
+        "individual" => Some(DefKind::Occurrence),
+        "metadata" => Some(DefKind::Metadata),
         // KerML
-        "class_definition" => Some(DefKind::Class),
-        "struct_definition" => Some(DefKind::Struct),
-        "assoc_definition" => Some(DefKind::Assoc),
-        "behavior_definition" => Some(DefKind::Behavior),
-        "datatype_definition" => Some(DefKind::Datatype),
-        "feature_definition" => Some(DefKind::Feature),
-        "function_definition" => Some(DefKind::Function),
-        "interaction_definition" => Some(DefKind::Interaction),
-        "connector_definition" => Some(DefKind::Connector),
-        "predicate_definition" => Some(DefKind::Predicate),
-        "namespace_definition" => Some(DefKind::Namespace),
-        "type_definition" => Some(DefKind::Type),
-        "classifier_definition" => Some(DefKind::Classifier),
-        "metaclass_definition" => Some(DefKind::Metaclass),
-        "expr_definition" => Some(DefKind::Expr),
-        "step_definition" => Some(DefKind::Step),
-        "metadata_definition" => Some(DefKind::Metadata),
-        "annotation_definition" => Some(DefKind::Annotation),
+        "case" => Some(DefKind::UseCase),
+        "class" => Some(DefKind::Class),
+        "struct" => Some(DefKind::Struct),
+        "assoc" => Some(DefKind::Assoc),
+        "behavior" => Some(DefKind::Behavior),
+        "datatype" => Some(DefKind::Datatype),
+        "feature" => Some(DefKind::Feature),
+        "function" => Some(DefKind::Function),
+        "interaction" => Some(DefKind::Interaction),
+        "connector" => Some(DefKind::Connector),
+        "predicate" => Some(DefKind::Predicate),
+        "namespace" => Some(DefKind::Namespace),
+        "type" => Some(DefKind::Type),
+        "classifier" => Some(DefKind::Classifier),
+        "metaclass" => Some(DefKind::Metaclass),
+        "expr" => Some(DefKind::Expr),
+        "step" => Some(DefKind::Step),
         _ => None,
     }
 }
 
-/// Map grammar rule name to usage kind string.
-fn usage_kind_from_node(kind: &str) -> Option<&'static str> {
-    match kind {
-        "part_usage" => Some("part"),
-        "port_usage" => Some("port"),
+/// Determine DefKind from a CST node.
+/// Handles both the unified "definition" node (by inspecting keyword children)
+/// and legacy specific nodes like "state_definition", "enumeration_definition".
+fn def_kind_from_node(node: &Node, source: &[u8]) -> Option<DefKind> {
+    match node.kind() {
+        "definition" | "generic_definition" => {
+            // Unified definition: first keyword child determines kind
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.is_named() {
+                    continue;
+                }
+                let text = node_text(&child, source);
+                if text == "def" {
+                    // "def" alone = generic_definition
+                    return Some(DefKind::Feature);
+                }
+                if let Some(k) = def_kind_from_keyword(text) {
+                    return Some(k);
+                }
+            }
+            // Fallback for generic_definition with "def" keyword
+            Some(DefKind::Feature)
+        }
+        "state_definition" => Some(DefKind::State),
+        "enumeration_definition" => Some(DefKind::Enum),
+        "package_declaration" | "namespace_declaration" => Some(DefKind::Package),
+        _ => None,
+    }
+}
+
+/// Map a keyword string to usage kind.
+fn usage_kind_from_keyword(keyword: &str) -> Option<&'static str> {
+    match keyword {
+        "part" => Some("part"),
+        "port" => Some("port"),
+        "attribute" => Some("attribute"),
+        "item" => Some("item"),
+        "occurrence" => Some("occurrence"),
+        "calc" => Some("calc"),
+        "view" => Some("view"),
+        "viewpoint" => Some("viewpoint"),
+        "rendering" => Some("rendering"),
+        "concern" => Some("concern"),
+        "analysis" => Some("analysis"),
+        "verification" => Some("verification"),
+        "enum" => Some("enum"),
+        "message" => Some("message"),
+        "case" => Some("use case"),
+        "use" => Some("use case"),
+        "classifier" => Some("classifier"),
+        "metaclass" => Some("metaclass"),
+        "expr" => Some("expr"),
+        "step" => Some("step"),
+        "snapshot" => Some("snapshot"),
+        "timeslice" => Some("timeslice"),
+        _ => None,
+    }
+}
+
+/// Determine usage kind from a CST node.
+/// Handles both the unified "usage" node and specific usage nodes.
+fn usage_kind_from_node(node: &Node, source: &[u8]) -> Option<&'static str> {
+    match node.kind() {
+        "usage" => {
+            // Unified usage: first keyword child determines kind
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.is_named() {
+                    continue;
+                }
+                let text = node_text(&child, source);
+                if let Some(k) = usage_kind_from_keyword(text) {
+                    return Some(k);
+                }
+            }
+            Some("part") // default
+        }
+        // Specific usage nodes that still exist
         "action_usage" => Some("action"),
         "state_usage" => Some("state"),
-        "requirement_usage" => Some("requirement"),
-        "constraint_usage" => Some("constraint"),
-        "calc_usage" => Some("calc"),
         "connection_usage" => Some("connection"),
         "interface_usage" => Some("interface"),
-        "allocation_usage" => Some("allocation"),
-        "item_usage" => Some("item"),
-        "ref_usage" => Some("ref"),
-        "attribute_usage" => Some("attribute"),
-        "feature_usage" => Some("feature"),
-        "exhibit_state_usage" => Some("exhibit state"),
-        "occurrence_usage" => Some("occurrence"),
+        "constraint_usage" => Some("constraint"),
+        "requirement_usage" => Some("requirement"),
         "event_usage" => Some("event"),
-        "rendering_usage" => Some("rendering"),
-        "view_usage" => Some("view"),
-        "viewpoint_usage" => Some("viewpoint"),
-        "concern_usage" => Some("concern"),
-        "analysis_usage" => Some("analysis"),
-        "verification_usage" => Some("verification"),
-        "use_case_usage" => Some("use case"),
+        "allocation_usage" => Some("allocation"),
+        "flow_usage" => Some("flow"),
         "metadata_usage" => Some("metadata"),
-        "metaclass_usage" => Some("metaclass"),
-        "expr_usage" => Some("expr"),
-        "step_usage" => Some("step"),
+        "feature_usage" => Some("feature"),
         "binding_usage" => Some("binding"),
         "succession_usage" => Some("succession"),
         "succession_flow_usage" => Some("succession flow"),
+        "constraint_expression_usage" => Some("constraint"),
+        "kerml_usage" => {
+            // KerML usage: check keyword child
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.is_named() { continue; }
+                match node_text(&child, source) {
+                    "assoc" => return Some("assoc"),
+                    "behavior" => return Some("behavior"),
+                    "class" => return Some("class"),
+                    "connector" => return Some("connector"),
+                    "datatype" => return Some("datatype"),
+                    "function" => return Some("function"),
+                    "interaction" => return Some("interaction"),
+                    "predicate" => return Some("predicate"),
+                    "struct" => return Some("struct"),
+                    "type" => return Some("type"),
+                    "feature" => return Some("feature"),
+                    _ => {}
+                }
+            }
+            Some("feature")
+        }
         _ => None,
     }
+}
+
+/// Check if a node kind is a structural element (definition, usage, or body).
+fn is_structural_boundary(kind: &str) -> bool {
+    matches!(
+        kind,
+        "definition"
+            | "state_definition"
+            | "enumeration_definition"
+            | "generic_definition"
+            | "package_declaration"
+            | "namespace_declaration"
+            | "usage"
+            | "action_usage"
+            | "state_usage"
+            | "connection_usage"
+            | "interface_usage"
+            | "constraint_usage"
+            | "requirement_usage"
+            | "event_usage"
+            | "allocation_usage"
+            | "flow_usage"
+            | "metadata_usage"
+            | "feature_usage"
+            | "binding_usage"
+            | "succession_usage"
+            | "succession_flow_usage"
+            | "constraint_expression_usage"
+            | "kerml_usage"
+            | "definition_body"
+            | "state_body"
+            | "{"
+    )
 }
 
 /// Extract direction modifier from preceding siblings.
@@ -212,11 +327,7 @@ fn get_direction(node: &Node) -> Option<Direction> {
             "out" => return Some(Direction::Out),
             "inout" => return Some(Direction::InOut),
             // Stop at other structural nodes (don't cross declaration boundaries)
-            k if def_kind_from_node(k).is_some()
-                || usage_kind_from_node(k).is_some()
-                || k == "definition_body"
-                || k == "state_body"
-                || k == "{" => break,
+            k if is_structural_boundary(k) => break,
             _ => {}
         }
         sibling = sib.prev_sibling();
@@ -248,10 +359,7 @@ fn is_conjugated_type(node: &Node, source: &[u8]) -> bool {
     while let Some(sib) = sibling {
         match sib.kind() {
             "conjugate" => return true,
-            k if def_kind_from_node(k).is_some()
-                || usage_kind_from_node(k).is_some()
-                || k == "definition_body"
-                || k == "{" => break,
+            k if is_structural_boundary(k) => break,
             _ => {}
         }
         sibling = sib.prev_sibling();
@@ -278,11 +386,7 @@ fn get_visibility(node: &Node) -> Option<Visibility> {
                 return None;
             }
             // Stop at structural boundaries
-            k if def_kind_from_node(k).is_some()
-                || usage_kind_from_node(k).is_some()
-                || k == "definition_body"
-                || k == "state_body"
-                || k == "{" => break,
+            k if is_structural_boundary(k) => break,
             _ => {}
         }
         sibling = sib.prev_sibling();
@@ -296,11 +400,7 @@ fn is_abstract(node: &Node) -> bool {
     while let Some(sib) = sibling {
         match sib.kind() {
             "abstract" => return true,
-            k if def_kind_from_node(k).is_some()
-                || usage_kind_from_node(k).is_some()
-                || k == "definition_body"
-                || k == "state_body"
-                || k == "{" => break,
+            k if is_structural_boundary(k) => break,
             _ => {}
         }
         sibling = sib.prev_sibling();
@@ -450,36 +550,96 @@ fn get_value_expr(node: &Node, source: &[u8]) -> Option<String> {
 }
 
 /// Extract redefines target from a usage node.
+/// Handles both old "redefines_keyword" and new "keyword_type_relationship" + "redefinition" nodes.
 fn get_redefinition(node: &Node, source: &[u8]) -> Option<String> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "redefines_keyword" {
-            // redefines_keyword contains: redefines <qualified_name>
-            let mut rc = child.walk();
-            for rc_child in child.children(&mut rc) {
-                if rc_child.kind() == "qualified_name" || rc_child.kind() == "identifier" {
-                    return Some(node_text(&rc_child, source).to_string());
+    fn search_children(node: &Node, source: &[u8]) -> Option<String> {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "redefines_keyword" | "redefinition" => {
+                    // Contains: :>> target or redefines target
+                    if let Some(t) = child.child_by_field_name("target") {
+                        return Some(node_text(&t, source).to_string());
+                    }
+                    let mut rc = child.walk();
+                    for rc_child in child.children(&mut rc) {
+                        if rc_child.kind() == "qualified_name" || rc_child.kind() == "identifier" {
+                            return Some(node_text(&rc_child, source).to_string());
+                        }
+                    }
+                }
+                "keyword_type_relationship" => {
+                    // Check if the keyword is "redefines"
+                    let mut kc = child.walk();
+                    let mut is_redefines = false;
+                    for kc_child in child.children(&mut kc) {
+                        if !kc_child.is_named() && node_text(&kc_child, source) == "redefines" {
+                            is_redefines = true;
+                        }
+                        if is_redefines {
+                            if let Some(t) = kc_child.child_by_field_name("target") {
+                                return Some(node_text(&t, source).to_string());
+                            }
+                            if kc_child.kind() == "qualified_name" || kc_child.kind() == "identifier" || kc_child.kind() == "feature_chain" {
+                                return Some(node_text(&kc_child, source).to_string());
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    if let Some(r) = search_children(&child, source) {
+                        return Some(r);
+                    }
                 }
             }
         }
+        None
     }
-    None
+    search_children(node, source)
 }
 
 /// Extract subsets target from a usage node.
+/// Handles both old "subsets_keyword" and new "keyword_type_relationship" nodes.
 fn get_subsets(node: &Node, source: &[u8]) -> Option<String> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "subsets_keyword" {
-            let mut sc = child.walk();
-            for sc_child in child.children(&mut sc) {
-                if sc_child.kind() == "qualified_name" || sc_child.kind() == "identifier" {
-                    return Some(node_text(&sc_child, source).to_string());
+    fn search_children(node: &Node, source: &[u8]) -> Option<String> {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "subsets_keyword" => {
+                    let mut sc = child.walk();
+                    for sc_child in child.children(&mut sc) {
+                        if sc_child.kind() == "qualified_name" || sc_child.kind() == "identifier" {
+                            return Some(node_text(&sc_child, source).to_string());
+                        }
+                    }
+                }
+                "keyword_type_relationship" => {
+                    let mut kc = child.walk();
+                    let mut is_subsets = false;
+                    for kc_child in child.children(&mut kc) {
+                        if !kc_child.is_named() && node_text(&kc_child, source) == "subsets" {
+                            is_subsets = true;
+                        }
+                        if is_subsets {
+                            if let Some(t) = kc_child.child_by_field_name("target") {
+                                return Some(node_text(&t, source).to_string());
+                            }
+                            if kc_child.kind() == "qualified_name" || kc_child.kind() == "identifier" || kc_child.kind() == "feature_chain" {
+                                return Some(node_text(&kc_child, source).to_string());
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    if let Some(r) = search_children(&child, source) {
+                        return Some(r);
+                    }
                 }
             }
         }
+        None
     }
-    None
+    search_children(node, source)
 }
 
 /// Recursively walk the parse tree and extract model elements.
@@ -523,8 +683,16 @@ fn walk_node_scoped(
         }
 
         // --- Definitions ---
-        k if def_kind_from_node(k).is_some() => {
-            let def_kind = def_kind_from_node(k).unwrap();
+        "definition" | "state_definition" | "enumeration_definition"
+        | "generic_definition" | "package_declaration" | "namespace_declaration" => {
+            let Some(def_kind) = def_kind_from_node(&node, source) else {
+                // Fall through to default recursion
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    walk_node_scoped(child, source, model, enclosing_verification, parent_def_name);
+                }
+                return;
+            };
             if let Some(name) = field_text(&node, "name", source) {
                 let super_type = get_supertype(&node, source);
 
@@ -616,8 +784,12 @@ fn walk_node_scoped(
         }
 
         // --- Usages ---
-        k if usage_kind_from_node(k).is_some() => {
-            let usage_kind = usage_kind_from_node(k).unwrap();
+        "usage" | "action_usage" | "state_usage" | "connection_usage"
+        | "interface_usage" | "constraint_usage" | "requirement_usage"
+        | "event_usage" | "allocation_usage" | "flow_usage" | "metadata_usage"
+        | "feature_usage" | "binding_usage" | "succession_usage"
+        | "succession_flow_usage" | "constraint_expression_usage" | "kerml_usage" => {
+            let usage_kind = usage_kind_from_node(&node, source).unwrap_or("feature");
             let redefinition = get_redefinition(&node, source);
             let subsets = get_subsets(&node, source);
             // Fall back to redefines/subsets target as usage name
@@ -660,7 +832,7 @@ fn walk_node_scoped(
                 });
 
                 // Connection and interface usages can have connect clauses
-                if k == "connection_usage" || k == "interface_usage" {
+                if kind == "connection_usage" || kind == "interface_usage" {
                     extract_connect_clause(&node, source, model);
                 }
 
@@ -678,7 +850,7 @@ fn walk_node_scoped(
                 }
             } else {
                 // Connection/interface usages without names
-                if k == "connection_usage" || k == "interface_usage" {
+                if kind == "connection_usage" || kind == "interface_usage" {
                     extract_connect_clause(&node, source, model);
                 }
             }
@@ -763,11 +935,27 @@ fn walk_node_scoped(
         }
 
         // --- Control flow nodes (fork, join, merge, decide) ---
-        "fork_node" | "join_node" | "merge_node" | "decide_node" => {
-            let kind = node.kind().to_string(); // e.g. "fork_node"
+        "fork_node" | "join_node" | "merge_node" | "decide_node" | "control_node" => {
+            // For unified control_node, determine kind from first keyword child
+            let ctrl_kind = if kind == "control_node" {
+                let mut cursor = node.walk();
+                let mut found = "control_node".to_string();
+                for child in node.children(&mut cursor) {
+                    match node_text(&child, source) {
+                        "fork" => { found = "fork_node".to_string(); break; }
+                        "join" => { found = "join_node".to_string(); break; }
+                        "merge" => { found = "merge_node".to_string(); break; }
+                        "decide" => { found = "decide_node".to_string(); break; }
+                        _ => {}
+                    }
+                }
+                found
+            } else {
+                kind.to_string()
+            };
             if let Some(name) = field_text(&node, "name", source) {
                 model.usages.push(Usage {
-                    kind,
+                    kind: ctrl_kind,
                     name,
                     type_ref: None,
                     span: Span::from_node(&node),
@@ -781,6 +969,144 @@ fn walk_node_scoped(
                     subsets: None,
                     qualified_name: None,
                 });
+            }
+        }
+
+        // --- Dependency statement ---
+        "dependency_statement" => {
+            let name = field_text(&node, "name", source);
+            let mut from_refs = Vec::new();
+            let mut to_refs = Vec::new();
+            let mut after_from = false;
+            let mut after_to = false;
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                match child.kind() {
+                    "from" => { after_from = true; after_to = false; }
+                    "to" => { after_to = true; after_from = false; }
+                    "qualified_name" | "feature_chain" | "identifier" => {
+                        let text = node_text(&child, source).to_string();
+                        if after_to {
+                            to_refs.push(text);
+                        } else if after_from {
+                            from_refs.push(text);
+                        } else if name.is_none() {
+                            // Unnamed: first ref before "to" is the source
+                            from_refs.push(text);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for from in &from_refs {
+                for to in &to_refs {
+                    model.connections.push(Connection {
+                        name: name.clone(),
+                        source: from.clone(),
+                        target: to.clone(),
+                        span: Span::from_node(&node),
+                    });
+                }
+            }
+        }
+
+        // --- Connect statement (standalone) ---
+        "connect_statement" => {
+            extract_connect_clause(&node, source, model);
+            // Also try direct "ref to ref" pattern
+            let mut refs = Vec::new();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if matches!(child.kind(), "qualified_name" | "feature_chain" | "identifier") {
+                    refs.push(node_text(&child, source).to_string());
+                }
+            }
+            if refs.len() >= 2 {
+                model.connections.push(Connection {
+                    name: None,
+                    source: refs[0].clone(),
+                    target: refs[1].clone(),
+                    span: Span::from_node(&node),
+                });
+            }
+        }
+
+        // --- Message statement ---
+        "message_statement" => {
+            let name = field_text(&node, "name", source);
+            let mut from_ref = None;
+            let mut to_ref = None;
+            let mut after_from = false;
+            let mut after_to = false;
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                match child.kind() {
+                    "from" => { after_from = true; }
+                    "to" => { after_to = true; after_from = false; }
+                    "qualified_name" | "feature_chain" | "identifier" => {
+                        let text = node_text(&child, source).to_string();
+                        if after_to && to_ref.is_none() {
+                            to_ref = Some(text);
+                        } else if after_from && from_ref.is_none() {
+                            from_ref = Some(text);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let (Some(src), Some(tgt)) = (from_ref, to_ref) {
+                model.flows.push(Flow {
+                    name,
+                    item_type: None,
+                    source: src,
+                    target: tgt,
+                    span: Span::from_node(&node),
+                });
+            }
+        }
+
+        // --- Verify statement ---
+        "verify_statement" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if matches!(child.kind(), "qualified_name" | "identifier") {
+                    let req_name = node_text(&child, source).to_string();
+                    if let Some(ver_name) = enclosing_verification.or(parent_def_name) {
+                        model.verifications.push(Verification {
+                            requirement: req_name,
+                            by: ver_name.to_string(),
+                            span: Span::from_node(&node),
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+
+        // --- Assert statement ---
+        "assert_statement" => {
+            // assert not constraint X; or assert constraint X;
+            // Recurse to find nested constraint_usage
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                walk_node_scoped(child, source, model, enclosing_verification, parent_def_name);
+            }
+            return;
+        }
+
+        // --- Accept action (standalone accept outside transition) ---
+        "accept_action" => {
+            // Accept actions reference types/events
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if matches!(child.kind(), "qualified_name" | "identifier") {
+                    let name = node_text(&child, source).to_string();
+                    model.type_references.push(TypeReference {
+                        name,
+                        span: Span::from_node(&node),
+                    });
+                    break;
+                }
             }
         }
 
