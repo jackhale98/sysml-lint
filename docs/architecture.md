@@ -2,24 +2,13 @@
 
 ## Workspace Structure
 
-`sysml` is a Cargo workspace with 13 crates. The `sysml-core` library is the foundation — all domain crates and the language server depend only on it. No domain crate depends on any other domain crate.
+`sysml` is a Cargo workspace with 3 crates. The `sysml-core` library is the foundation — both the CLI and language server depend only on it.
 
 ```
 crates/
   sysml-core/         Core library (parser, model, checks, simulation, codegen)
   sysml-cli/          CLI frontend (clap, command dispatch, output formatting)
-  sysml-verify/       Verification domain
-  sysml-scaffold/     Scaffolding and template generation
-  sysml-risk/         Risk management
-  sysml-tol/          Tolerance analysis
-  sysml-bom/          Bill of materials
-  sysml-source/       Supplier management
-  sysml-mfg/          Manufacturing execution
-  sysml-qc/           Quality control
-  sysml-capa/         Quality management (NCR, CAPA, Process Deviation)
-  sysml-report/       Cross-domain reporting
   sysml-lsp/          Language server (LSP) for editor integration
-libraries/            Domain library .sysml files
 tree-sitter-sysml/    Grammar (git submodule)
 test/fixtures/        SysML v2 test files
 ```
@@ -29,19 +18,8 @@ test/fixtures/        SysML v2 test files
 ```
 sysml-core
     |
-    +-- sysml-verify
-    +-- sysml-scaffold
-    +-- sysml-risk
-    +-- sysml-tol
-    +-- sysml-bom
-    +-- sysml-source
-    +-- sysml-mfg
-    +-- sysml-qc
-    +-- sysml-capa
-    +-- sysml-report
-    +-- sysml-lsp   (depends on sysml-core only)
-    |
-    +-- sysml-cli  (depends on sysml-core + all domain crates)
+    +-- sysml-cli
+    +-- sysml-lsp
 ```
 
 ## sysml-core
@@ -112,10 +90,4 @@ State is managed with `DashMap` for concurrent access — tower-lsp dispatches r
 
 **Flat command namespace**: All commands are top-level (`sysml risk matrix`, not `sysml lifecycle risk matrix`). Designed for non-software engineers who shouldn't need to memorize a command hierarchy.
 
-**No cross-domain crate dependencies**: Domain crates communicate through the shared cache and record system in `sysml-core`. This keeps compile times fast and prevents circular dependencies.
-
-**Git-native records**: Append-only TOML records use filenames that encode timestamp + author + hash, making merge conflicts impossible. Entity records use `BTreeMap` for deterministic key ordering.
-
-**Progressive enhancement**: The tool works with zero configuration for pure SysML v2 analysis. The `.sysml/` project, cache, records, and domain libraries are opt-in.
-
-**Optional SQLite cache**: When built with `--features sqlite`, the index command persists the in-memory cache to `.sysml/cache.db` using `rusqlite` (bundled). The `SqliteCache` has the same query API as the in-memory `Cache`. It stores a git HEAD hash so stale caches can be detected. The feature is opt-in — the default build uses only the in-memory cache.
+**Progressive enhancement**: The tool works with zero configuration for pure SysML v2 analysis. The `.sysml/` project and cache are opt-in.

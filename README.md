@@ -1,6 +1,6 @@
 # sysml
 
-A fast, standalone SysML v2 command-line toolchain for model authoring, validation, simulation, diagram generation, and full product lifecycle management.
+A fast, standalone SysML v2 command-line toolchain and language server for model authoring, validation, simulation, and diagram generation.
 
 Built on [tree-sitter](https://tree-sitter.github.io/) for reliable parsing of SysML v2 textual notation. Zero runtime dependencies — just a single binary.
 
@@ -10,10 +10,9 @@ Built on [tree-sitter](https://tree-sitter.github.io/) for reliable parsing of S
 |---|---|
 | [Tutorial](docs/tutorial.md) | Build a weather station model from scratch using the CLI |
 | [Validation & Diagnostics](docs/validation.md) | 9 lint checks, diagnostic codes, output formats |
-| [Domain Libraries](docs/domain-libraries.md) | Base types for risk, tolerance, BOM, manufacturing, quality |
-| [Architecture](docs/architecture.md) | Crate structure, design decisions, 13-crate workspace |
+| [Architecture](docs/architecture.md) | Crate structure, design decisions, 3-crate workspace |
 | [CI & Editor Integration](docs/ci-integration.md) | GitHub Actions workflow, LSP setup, Emacs sysml2-mode, JSON output |
-| **Command references** | [Analysis](docs/commands/analysis.md) &#183; [Diagrams](docs/commands/diagrams.md) &#183; [Editing](docs/commands/editing.md) &#183; [Simulation](docs/commands/simulation.md) &#183; [Lifecycle](docs/commands/lifecycle.md) &#183; [Project](docs/commands/project.md) |
+| **Command references** | [Analysis](docs/commands/analysis.md) &#183; [Diagrams](docs/commands/diagrams.md) &#183; [Editing](docs/commands/editing.md) &#183; [Simulation](docs/commands/simulation.md) &#183; [Project](docs/commands/project.md) |
 
 ## Installation
 
@@ -33,12 +32,6 @@ cp target/release/sysml ~/.local/bin/
 ```
 
 The build compiles the [tree-sitter-sysml](https://github.com/jackhale98/tree-sitter-sysml) grammar from source (included as a submodule). Requires Rust 1.70+ and a C compiler (gcc or clang).
-
-To enable the optional SQLite-backed persistent cache:
-
-```sh
-cargo install --path crates/sysml-cli --features sqlite
-```
 
 ### Language server (LSP)
 
@@ -223,38 +216,6 @@ BatteryLife          PowerSupply          TestBatteryLife
 Coverage: 3/3 satisfied (100%), 2/3 verified (67%)
 ```
 
-### Full lifecycle in one tool
-
-Risk matrices, FMEA, tolerance stack-ups, BOM rollups, supplier RFQs, verification execution, NCR/CAPA/Deviation tracking — all driven from SysML models with domain library types:
-
-```sh
-sysml risk add                                  # Interactive risk creation wizard
-sysml risk matrix model.sysml                   # 5x5 severity/likelihood matrix
-sysml risk fmea model.sysml                     # FMEA worksheet
-
-sysml verify run verification.sysml             # Step-through test execution
-sysml quality create --type ncr                 # NCR wizard → TOML record
-sysml quality rca --source NCR-001 --method fishbone
-
-sysml tol analyze model.sysml --method monte-carlo --iterations 50000
-sysml bom rollup model.sysml --root Vehicle --include-mass --include-cost
-sysml mfg start-lot model.sysml                # Start a production lot
-sysml mfg step                                 # Execute next manufacturing step
-```
-
-All lifecycle records are written as TOML files to `.sysml/records/` for traceability.
-
-### Manufacturing SPC and process capability
-
-```sh
-$ sysml mfg spc --parameter SensorCalibration --values 0.48,0.52,0.50,0.49,0.51,0.50,0.53,0.47
-  Mean: 0.500  Std: 0.019  UCL: 0.557  LCL: 0.443
-  All points within control limits
-
-$ sysml qc capability --usl 10.05 --lsl 9.95 --values 10.01,9.99,10.02,9.98,10.00
-  Cp: 1.67  Cpk: 1.33  Process is capable
-```
-
 ### Semantic diff — compare models, not text
 
 ```sh
@@ -316,15 +277,6 @@ sysml pipeline run ci
 | **Simulation & Export** | | [simulation](docs/commands/simulation.md) |
 | `simulate` | Evaluate constraints, state machines, action flows | |
 | `export` | Export FMI 3.0, Modelica, SSP artifacts | |
-| **Lifecycle** | | [lifecycle](docs/commands/lifecycle.md) |
-| `verify` | Verification case management, coverage, interactive execution | |
-| `risk` | Risk management, matrix, FMEA, interactive risk creation | |
-| `tol` | Tolerance stack-up analysis (worst-case, RSS, Monte Carlo) | |
-| `bom` | Bill of materials rollup, where-used, export | |
-| `source` | Supplier management, RFQ, approved source lists | |
-| `mfg` | Manufacturing routings, SPC, lot tracking, step execution | |
-| `qc` | Quality control, sampling plans, Cp/Cpk | |
-| `quality` | Quality management (NCR, CAPA, Process Deviation, RCA) | |
 | **Project** | | [project](docs/commands/project.md) |
 | `init` | Initialize a `.sysml/` project | |
 | `index` | Build or rebuild project index | |
@@ -334,23 +286,6 @@ sysml pipeline run ci
 | `completions` | Generate shell completion scripts | |
 | **Language Server** | | [editor setup](docs/ci-integration.md#language-server-sysml-lsp) |
 | `sysml-lsp` | LSP server with 13 capabilities: diagnostics, go-to-def, references, hover, completions, outline, workspace symbols, semantic highlighting, code actions, formatting, document highlight, folding, rename | |
-
-## Domain Libraries
-
-The tool ships with SysML v2 domain libraries that provide base types for lifecycle workflows. When `sysml init` detects a `libraries/` directory, it automatically configures it for import resolution — no `-I` flag needed.
-
-| Library | Package | Purpose |
-|---------|---------|---------|
-| `sysml-verification-ext.sysml` | `SysMLVerification` | Verification status, methods, acceptance criteria |
-| `sysml-risk.sysml` | `SysMLRisk` | Severity/likelihood enums, RiskDef, MitigationDef |
-| `sysml-tolerance.sysml` | `SysMLTolerance` | ToleranceDef, DimensionChainDef, GD&T types |
-| `sysml-bom.sysml` | `SysMLBOM` | PartIdentity, MassProperty, SupplierDef |
-| `sysml-manufacturing.sysml` | `SysMLManufacturing` | ProcessDef, RoutingDef, WorkInstructionDef |
-| `sysml-quality.sysml` | `SysMLQuality` | InspectionPlanDef, GaugeRRDef, sampling |
-| `sysml-capa.sysml` | `SysMLCAPA` | NCR/CAPA/Deviation lifecycles, categories, dispositions |
-| `sysml-project.sysml` | `SysMLProject` | Phase gates, milestone definitions |
-
-See [Domain Libraries](docs/domain-libraries.md) for detailed type references and usage patterns.
 
 ## License
 

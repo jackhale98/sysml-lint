@@ -4,9 +4,9 @@
 
 ```
 crates/
-  sysml-core/      Core library (parser, model, checks, sim, export, codegen)
-  sysml-cli/       CLI frontend (clap commands, output formatting)
-  sysml-lsp/       Language server (diagnostics, go-to-def, hover, completions, outline)
+  sysml-core/      Core library (parser, model, checks, simulation, export, codegen)
+  sysml-cli/       CLI frontend (24 commands for validation, analysis, simulation)
+  sysml-lsp/       Language server (13 LSP capabilities for editor integration)
 tree-sitter-sysml/ Grammar (git submodule)
 test/fixtures/     SysML v2 test files
 ```

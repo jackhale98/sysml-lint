@@ -58,17 +58,14 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand)]
 pub(crate) enum Command {
-    /// Lint SysML v2 files for structural issues.
-    ///
-    /// Validates SysML v2 models against structural rules: syntax errors,
-    /// duplicate definitions, unused elements, unsatisfied requirements, and more.
+    /// Lint SysML v2 files (alias for `check --lint-only`).
+    #[command(hide = true)]
     Lint {
         /// SysML v2 files to validate.
         #[arg(required = true)]
         files: Vec<PathBuf>,
 
         /// Disable specific checks (comma-separated).
-        /// Available: syntax, duplicates, unused, unresolved, unsatisfied, unverified, port-types, constraints, calculations
         #[arg(short, long, value_delimiter = ',')]
         disable: Vec<String>,
 
@@ -244,6 +241,7 @@ pub(crate) enum Command {
     /// what can be simulated in a file.
     ///
     /// SUBCOMMANDS: eval, state-machine (sm), action-flow (af), list
+    #[command(visible_alias = "sim")]
     Simulate {
         #[command(subcommand)]
         kind: SimulateCommand,
@@ -369,6 +367,7 @@ pub(crate) enum Command {
     /// EXAMPLES:
     ///   sysml remove model.sysml Engine
     ///   sysml remove model.sysml Engine --dry-run
+    #[command(visible_alias = "rm")]
     Remove {
         /// Target SysML file.
         #[arg(required = true)]
@@ -491,6 +490,7 @@ pub(crate) enum Command {
     /// Lists logical-to-physical allocation mappings and identifies
     /// unallocated elements. In SysML v2, allocations map actions/use-cases
     /// to parts (logical to physical architecture).
+    #[command(visible_alias = "alloc")]
     Allocation {
         /// SysML v2 files to analyze.
         #[arg(required = true)]
@@ -536,11 +536,12 @@ pub(crate) enum Command {
     /// Validate SysML v2 models and check project integrity.
     ///
     /// Runs all lint checks plus optional project-level checks (broken
-    /// record references, orphaned records). Use `sysml lint` as a
-    /// shortcut for `sysml check --lint-only`.
+    /// record references, orphaned records). Use --lint-only for fast
+    /// structural validation without project checks.
     ///
     /// EXAMPLES:
     ///   sysml check model.sysml
+    ///   sysml check --severity error model.sysml
     ///   sysml check --lint-only model.sysml
     Check {
         /// SysML v2 files to validate.
@@ -558,150 +559,6 @@ pub(crate) enum Command {
         /// Run only lint checks (no record or project checks).
         #[arg(long)]
         lint_only: bool,
-    },
-    /// Verification domain commands.
-    ///
-    /// Manage verification case execution, coverage analysis, and
-    /// test record tracking for SysML v2 models.
-    ///
-    /// EXAMPLES:
-    ///   sysml verify coverage model.sysml
-    ///   sysml verify list model.sysml
-    #[cfg(feature = "verify")]
-    Verify {
-        #[command(subcommand)]
-        kind: VerifyCommand,
-    },
-    /// Generate a complete example project with teaching comments.
-    ///
-    /// Creates a set of SysML v2 files forming a working example project
-    /// with parts, requirements, and verification cases.
-    ///
-    /// EXAMPLES:
-    ///   sysml example brake-system
-    ///   sysml example sensor-module -o ./myproject
-    ///   sysml example --list
-    #[cfg(feature = "scaffold")]
-    Example {
-        /// Example name (omit with --list to see available examples).
-        name: Option<String>,
-
-        /// Output directory (default: current directory).
-        #[arg(short = 'o', long)]
-        output: Option<PathBuf>,
-
-        /// List available example projects.
-        #[arg(long)]
-        list: bool,
-    },
-    /// Risk management commands.
-    ///
-    /// Identify, assess, and track risks. Generate risk matrices and
-    /// FMEA worksheets from SysML v2 models.
-    ///
-    /// EXAMPLES:
-    ///   sysml risk list model.sysml
-    ///   sysml risk matrix model.sysml
-    ///   sysml risk fmea model.sysml
-    #[cfg(feature = "risk")]
-    Risk {
-        #[command(subcommand)]
-        kind: RiskCommand,
-    },
-    /// Tolerance analysis commands.
-    ///
-    /// Perform worst-case, RSS, and Monte Carlo tolerance stack-up
-    /// analysis on dimension chains defined in SysML v2 models.
-    ///
-    /// EXAMPLES:
-    ///   sysml tol analyze model.sysml
-    ///   sysml tol sensitivity model.sysml
-    #[cfg(feature = "tol")]
-    Tol {
-        #[command(subcommand)]
-        kind: TolCommand,
-    },
-    /// Bill of materials commands.
-    ///
-    /// Build hierarchical BOM trees, perform mass/cost rollups,
-    /// where-used queries, and CSV export from SysML v2 models.
-    ///
-    /// EXAMPLES:
-    ///   sysml bom rollup model.sysml --root Vehicle
-    ///   sysml bom where-used model.sysml --part Engine
-    ///   sysml bom export model.sysml --root Vehicle
-    #[cfg(feature = "bom")]
-    Bom {
-        #[command(subcommand)]
-        kind: BomCommand,
-    },
-    /// Supplier management commands.
-    ///
-    /// List suppliers, view approved source lists, and generate
-    /// request-for-quotation documents from SysML v2 models.
-    ///
-    /// EXAMPLES:
-    ///   sysml source list model.sysml
-    ///   sysml source asl model.sysml
-    ///   sysml source rfq --part Resistor --quantity 5000
-    #[cfg(feature = "source")]
-    Source {
-        #[command(subcommand)]
-        kind: SourceCommand,
-    },
-    /// Manufacturing execution commands.
-    ///
-    /// List manufacturing routings extracted from action definitions
-    /// and compute SPC statistics on process parameter readings.
-    ///
-    /// EXAMPLES:
-    ///   sysml mfg list model.sysml
-    ///   sysml mfg spc --parameter Diameter --values 10.01,10.02,9.99,10.00
-    #[cfg(feature = "mfg")]
-    Mfg {
-        #[command(subcommand)]
-        kind: MfgCommand,
-    },
-    /// Quality control commands.
-    ///
-    /// ANSI Z1.4 sample size lookup and process capability (Cp/Cpk)
-    /// analysis for manufacturing quality control.
-    ///
-    /// EXAMPLES:
-    ///   sysml qc sample-size --lot-size 500
-    ///   sysml qc capability --usl 10.05 --lsl 9.95 --values 10.01,10.02,9.99
-    #[cfg(feature = "qc")]
-    Qc {
-        #[command(subcommand)]
-        kind: QcCommand,
-    },
-    /// Quality management commands (NCR, CAPA, Process Deviation).
-    ///
-    /// Create and manage nonconformance reports (NCRs), corrective/preventive
-    /// action programs (CAPAs), and process deviations — each as distinct
-    /// quality items with their own lifecycle.
-    ///
-    /// EXAMPLES:
-    ///   sysml quality trend model.sysml
-    ///   sysml quality list
-    #[cfg(feature = "capa")]
-    Quality {
-        #[command(subcommand)]
-        kind: QualityCommand,
-    },
-    /// Cross-domain reporting commands.
-    ///
-    /// Generate project dashboards, full lifecycle traceability
-    /// threads, and gate readiness checks from SysML v2 models.
-    ///
-    /// EXAMPLES:
-    ///   sysml report dashboard model.sysml
-    ///   sysml report traceability model.sysml --requirement BrakeReq
-    ///   sysml report gate model.sysml --gate-name CDR
-    #[cfg(feature = "report")]
-    Report {
-        #[command(subcommand)]
-        kind: ReportCommand,
     },
     /// Model completeness and quality report.
     ///
@@ -725,13 +582,11 @@ pub(crate) enum Command {
     },
     /// Read a help topic about SysML or this tool.
     ///
-    /// Displays concise tutorials and reference material for engineers
-    /// who are new to SysML v2 or model-based systems engineering.
-    ///
     /// EXAMPLES:
     ///   sysml guide                    List available topics
     ///   sysml guide getting-started    Tutorial for first-time users
     ///   sysml guide sysml-basics       SysML v2 language overview
+    #[command(hide = true)]
     Guide {
         /// Topic to display (omit to list all topics).
         topic: Option<String>,
@@ -891,352 +746,6 @@ pub(crate) enum ExportCommand {
     },
 }
 
-#[cfg(feature = "verify")]
-#[derive(Subcommand)]
-pub(crate) enum VerifyCommand {
-    /// Show verification coverage for requirements.
-    ///
-    /// Combines model traceability (verify relationships) with execution
-    /// records to show which requirements have been verified and passed.
-    Coverage {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// List verification cases found in model files.
-    List {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Show verification status for all requirements.
-    Status {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Add a verification case to a SysML model (interactive wizard).
-    Add {
-        /// Target file to write the verification case into.
-        #[arg(long)]
-        file: Option<PathBuf>,
-        /// Insert inside this definition.
-        #[arg(long)]
-        inside: Option<String>,
-    },
-    /// Execute a verification case interactively, recording results.
-    ///
-    /// Presents each step of a verification case as a guided checklist,
-    /// captures measurements and pass/fail judgments, and writes a TOML
-    /// execution record to .sysml/records/.
-    Run {
-        /// SysML v2 files containing verification cases.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-        /// Name of the verification case to run (prompted if omitted).
-        #[arg(long)]
-        case: Option<String>,
-        /// Author name for the execution record.
-        #[arg(long, default_value = "engineer")]
-        author: String,
-    },
-}
-
-#[cfg(feature = "risk")]
-#[derive(Subcommand)]
-pub(crate) enum RiskCommand {
-    /// List risks found in model files.
-    List {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Generate a risk matrix with acceptance zones.
-    Matrix {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Generate an FMEA worksheet from model risks.
-    Fmea {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Show risk coverage: parts, actions, and use cases without assigned risks.
-    Coverage {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Add a risk element to a SysML model (interactive wizard).
-    Add {
-        /// Target file to write the risk element into.
-        #[arg(long)]
-        file: Option<PathBuf>,
-        /// Insert inside this definition.
-        #[arg(long)]
-        inside: Option<String>,
-    },
-}
-
-#[cfg(feature = "tol")]
-#[derive(Subcommand)]
-pub(crate) enum TolCommand {
-    /// Run tolerance stack-up analysis on dimension chains.
-    Analyze {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-
-        /// Analysis method: worst-case, rss, monte-carlo.
-        #[arg(long, default_value = "worst-case")]
-        method: String,
-
-        /// Number of Monte Carlo iterations.
-        #[arg(long, default_value = "10000")]
-        iterations: usize,
-    },
-    /// Rank tolerance contributors by sensitivity.
-    Sensitivity {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Add a tolerance dimension chain to a SysML model (interactive wizard).
-    Add {
-        /// Target file to write the tolerance chain into.
-        #[arg(long)]
-        file: Option<PathBuf>,
-        /// Insert inside this definition.
-        #[arg(long)]
-        inside: Option<String>,
-    },
-}
-
-#[cfg(feature = "bom")]
-#[derive(Subcommand)]
-pub(crate) enum BomCommand {
-    /// Build a hierarchical BOM tree with optional mass/cost rollup.
-    Rollup {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-        /// Root part definition name.
-        #[arg(long, required = true)]
-        root: String,
-        /// Include mass rollup in output.
-        #[arg(long)]
-        include_mass: bool,
-        /// Include cost rollup in output.
-        #[arg(long)]
-        include_cost: bool,
-    },
-    /// Find all definitions that use a given part (reverse lookup).
-    WhereUsed {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-        /// Part definition name to search for.
-        #[arg(long, required = true)]
-        part: String,
-    },
-    /// Export a flattened BOM as CSV.
-    Export {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-        /// Root part definition name.
-        #[arg(long, required = true)]
-        root: String,
-        /// Output format (csv).
-        #[arg(long, default_value = "csv")]
-        format: String,
-    },
-    /// Costed BOM: resolve quotes and show pricing at a production quantity.
-    ///
-    /// Reads quote records from .sysml/records/ and matches them to parts in
-    /// the BOM tree. Use --apply to write unitCost attributes back to the model.
-    Cost {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-        /// Root part definition name.
-        #[arg(long, required = true)]
-        root: String,
-        /// Production order quantity (number of top-level assemblies).
-        #[arg(long, required = true)]
-        quantity: u32,
-        /// Write resolved unitCost attributes back into model files.
-        #[arg(long)]
-        apply: bool,
-    },
-}
-
-#[cfg(feature = "source")]
-#[derive(Subcommand)]
-pub(crate) enum SourceCommand {
-    /// List suppliers extracted from model files.
-    List {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Show approved source list (approved/preferred suppliers only).
-    Asl {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Generate a request-for-quotation (RFQ) document.
-    Rfq {
-        /// Part name.
-        #[arg(long, required = true)]
-        part: String,
-        /// Part description.
-        #[arg(long, default_value = "")]
-        description: String,
-        /// Required quantity.
-        #[arg(long, default_value = "1")]
-        quantity: u32,
-    },
-    /// Record a supplier quote with quantity-based price breaks.
-    ///
-    /// Interactive wizard that creates a quote record in .sysml/records/.
-    /// Each quote links a supplier to a part with one or more price tiers.
-    Quote {
-        /// Author name for the record.
-        #[arg(long, default_value = "engineer")]
-        author: String,
-    },
-}
-
-#[cfg(feature = "mfg")]
-#[derive(Subcommand)]
-pub(crate) enum MfgCommand {
-    /// List manufacturing routings (action definitions) in model files.
-    List {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Compute SPC statistics for a parameter from readings.
-    Spc {
-        /// Parameter name.
-        #[arg(long, required = true)]
-        parameter: String,
-        /// Comma-separated measurement values.
-        #[arg(long, required = true, value_delimiter = ',')]
-        values: Vec<f64>,
-    },
-    /// Start a new production lot for a manufacturing routing.
-    ///
-    /// Creates a lot record with a unique ID and initializes all steps
-    /// to Pending status. The lot TOML record is written to .sysml/records/.
-    StartLot {
-        /// SysML v2 files containing the routing definition.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-        /// Name of the routing (action definition) to use.
-        #[arg(long)]
-        routing: Option<String>,
-        /// Lot quantity.
-        #[arg(long, default_value = "1")]
-        quantity: u32,
-        /// Lot type: production, prototype, first-article.
-        #[arg(long, default_value = "production", value_parser = ["production", "prototype", "first-article"])]
-        lot_type: String,
-        /// Author name for the lot record.
-        #[arg(long, default_value = "engineer")]
-        author: String,
-    },
-    /// Execute the next step of an active lot interactively.
-    ///
-    /// Prompts for parameter readings, validates against control limits,
-    /// and advances the lot. The updated lot record is written to .sysml/records/.
-    Step {
-        /// Lot ID (or prefix) to advance.
-        #[arg(required = true)]
-        lot_id: String,
-        /// Author name for the execution record.
-        #[arg(long, default_value = "engineer")]
-        author: String,
-    },
-}
-
-#[cfg(feature = "qc")]
-#[derive(Subcommand)]
-pub(crate) enum QcCommand {
-    /// Look up ANSI Z1.4 sample size for a given lot.
-    SampleSize {
-        /// Lot size (total number of units).
-        #[arg(long, required = true)]
-        lot_size: usize,
-        /// Acceptable quality level (percent defective).
-        #[arg(long, default_value = "1.0")]
-        aql: f64,
-        /// Inspection level: reduced, normal, tightened.
-        #[arg(long, default_value = "normal")]
-        level: String,
-    },
-    /// Compute process capability indices (Cp/Cpk).
-    Capability {
-        /// Upper specification limit.
-        #[arg(long, required = true)]
-        usl: f64,
-        /// Lower specification limit.
-        #[arg(long, required = true)]
-        lsl: f64,
-        /// Comma-separated measurement values.
-        #[arg(long, required = true, value_delimiter = ',')]
-        values: Vec<f64>,
-    },
-}
-
-#[cfg(feature = "capa")]
-#[derive(Subcommand)]
-pub(crate) enum QualityCommand {
-    /// Analyze NCR trends grouped by category or severity.
-    Trend {
-        /// SysML v2 files to correlate with NCR data.
-        files: Vec<PathBuf>,
-        /// Grouping dimension: category, severity, part, supplier.
-        #[arg(long, default_value = "category")]
-        group_by: String,
-    },
-    /// Show quality item status overview and workflow guidance.
-    List,
-    /// Create a quality item (NCR, CAPA, or Process Deviation).
-    Create {
-        /// Quality item type: ncr, capa, deviation.
-        #[arg(long, value_parser = ["ncr", "capa", "deviation"])]
-        r#type: Option<String>,
-        /// Target file to write the quality item into.
-        #[arg(long)]
-        file: Option<PathBuf>,
-        /// Insert inside this definition.
-        #[arg(long)]
-        inside: Option<String>,
-    },
-    /// Perform root cause analysis (5 Why or Fishbone) on an NCR or CAPA.
-    ///
-    /// Guided interactive analysis that produces a structured record.
-    Rca {
-        /// Source item ID (NCR or CAPA ID) to analyze.
-        #[arg(long)]
-        source: Option<String>,
-        /// RCA method: five-why or fishbone.
-        #[arg(long, value_parser = ["five-why", "fishbone"])]
-        method: Option<String>,
-    },
-    /// Add a corrective/preventive action to an existing CAPA.
-    Action {
-        /// CAPA ID to add the action to.
-        #[arg(long)]
-        capa: Option<String>,
-    },
-}
-
 #[derive(Subcommand)]
 pub(crate) enum PipelineCommand {
     /// List all pipelines defined in config.
@@ -1255,37 +764,5 @@ pub(crate) enum PipelineCommand {
         /// Pipeline name.
         #[arg(required = true)]
         name: String,
-    },
-}
-
-#[cfg(feature = "report")]
-#[derive(Subcommand)]
-pub(crate) enum ReportCommand {
-    /// Generate a project dashboard from model files.
-    Dashboard {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-    },
-    /// Trace a requirement through satisfaction, verification, and execution.
-    Traceability {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-        /// Requirement name to trace.
-        #[arg(long, required = true)]
-        requirement: String,
-    },
-    /// Check gate readiness (coverage, risks, NCRs).
-    Gate {
-        /// SysML v2 files to analyze.
-        #[arg(required = true)]
-        files: Vec<PathBuf>,
-        /// Gate name (e.g. PDR, CDR, FRR).
-        #[arg(long, required = true)]
-        gate_name: String,
-        /// Minimum verification coverage percentage required.
-        #[arg(long, default_value = "80.0")]
-        min_coverage: f64,
     },
 }

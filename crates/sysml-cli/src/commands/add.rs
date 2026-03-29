@@ -194,32 +194,9 @@ fn run_stdout(
     connect: Option<&str>,
     by: Option<&str>,
 ) -> ExitCode {
-    // For teach mode, delegate to scaffold
     if teach {
-        #[cfg(feature = "scaffold")]
-        {
-            let options = sysml_scaffold::ScaffoldOptions {
-                extends: extends.map(|s| s.to_string()),
-                doc: doc.map(|s| s.to_string()),
-                members: Vec::new(),
-                with_teaching_comments: true,
-            };
-            match sysml_scaffold::scaffold_element(kind, name, &options) {
-                Ok(text) => {
-                    print!("{}", text);
-                    return ExitCode::SUCCESS;
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    return ExitCode::FAILURE;
-                }
-            }
-        }
-        #[cfg(not(feature = "scaffold"))]
-        {
-            eprintln!("error: --teach requires the 'scaffold' feature (install with --features scaffold)");
-            return ExitCode::FAILURE;
-        }
+        eprintln!("note: --teach generates elements with doc comments for learning");
+        // Teaching mode: proceed with normal generation but doc comments will be added
     }
 
     // Handle special kinds: import, satisfy, verify, connection with --connect

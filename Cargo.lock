@@ -1094,26 +1094,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "sysml-bom"
-version = "0.3.0"
-dependencies = [
- "serde",
- "sysml-core",
- "sysml-source",
-]
-
-[[package]]
-name = "sysml-capa"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
- "sysml-core",
-]
-
-[[package]]
 name = "sysml-cli"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1121,23 +1103,13 @@ dependencies = [
  "dialoguer",
  "predicates",
  "serde_json",
- "sysml-bom",
- "sysml-capa",
  "sysml-core",
- "sysml-mfg",
- "sysml-qc",
- "sysml-report",
- "sysml-risk",
- "sysml-scaffold",
- "sysml-source",
- "sysml-tol",
- "sysml-verify",
  "tempfile",
 ]
 
 [[package]]
 name = "sysml-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "cc",
  "rusqlite",
@@ -1148,7 +1120,7 @@ dependencies = [
 
 [[package]]
 name = "sysml-lsp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "dashmap 6.1.0",
  "serde_json",
@@ -1159,72 +1131,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tree-sitter",
-]
-
-[[package]]
-name = "sysml-mfg"
-version = "0.3.0"
-dependencies = [
- "serde",
- "sysml-core",
-]
-
-[[package]]
-name = "sysml-qc"
-version = "0.3.0"
-dependencies = [
- "serde",
- "sysml-core",
-]
-
-[[package]]
-name = "sysml-report"
-version = "0.3.0"
-dependencies = [
- "serde",
- "sysml-core",
-]
-
-[[package]]
-name = "sysml-risk"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
- "sysml-core",
-]
-
-[[package]]
-name = "sysml-scaffold"
-version = "0.3.0"
-dependencies = [
- "sysml-core",
-]
-
-[[package]]
-name = "sysml-source"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
- "sysml-core",
-]
-
-[[package]]
-name = "sysml-tol"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
- "sysml-core",
-]
-
-[[package]]
-name = "sysml-verify"
-version = "0.3.0"
-dependencies = [
- "serde",
- "sysml-core",
 ]
 
 [[package]]

@@ -3,21 +3,11 @@ resolver = "2"
 members = [
     "crates/sysml-core",
     "crates/sysml-cli",
-    "crates/sysml-scaffold",
-    "crates/sysml-verify",
-    "crates/sysml-risk",
-    "crates/sysml-tol",
-    "crates/sysml-bom",
-    "crates/sysml-report",
-    "crates/sysml-mfg",
-    "crates/sysml-qc",
-    "crates/sysml-capa",
-    "crates/sysml-source",
     "crates/sysml-lsp",
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/jackhale98/sysml-cli"

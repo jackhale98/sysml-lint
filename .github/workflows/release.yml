@@ -59,42 +59,22 @@ jobs:
             target
           key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
 
-      # -- Core binary (sysml) --
-      - name: Build core release
+      # -- CLI binary (sysml) --
+      - name: Build CLI release
         run: cargo build --release --target ${{ matrix.target }} -p sysml-cli
 
-      - name: Package core (Unix)
+      - name: Package CLI (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.artifact }}.tar.gz sysml
           cd ../../..
 
-      - name: Package core (Windows)
+      - name: Package CLI (Windows)
         if: runner.os == 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
           7z a ../../../${{ matrix.artifact }}.zip sysml.exe
-          cd ../../..
-
-      # -- Lifecycle binary (sysml-lifecycle) --
-      - name: Build lifecycle release
-        run: cargo build --release --target ${{ matrix.target }} -p sysml-cli --features lifecycle
-
-      - name: Package lifecycle (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          cp target/${{ matrix.target }}/release/sysml target/${{ matrix.target }}/release/sysml-lifecycle
-          cd target/${{ matrix.target }}/release
-          tar czf ../../../${{ matrix.artifact }}-lifecycle.tar.gz sysml-lifecycle
-          cd ../../..
-
-      - name: Package lifecycle (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          copy target\${{ matrix.target }}\release\sysml.exe target\${{ matrix.target }}\release\sysml-lifecycle.exe
-          cd target/${{ matrix.target }}/release
-          7z a ../../../${{ matrix.artifact }}-lifecycle.zip sysml-lifecycle.exe
           cd ../../..
 
       # -- LSP binary (sysml-lsp) --
@@ -122,8 +102,6 @@ jobs:
           path: |
             ${{ matrix.artifact }}.tar.gz
             ${{ matrix.artifact }}.zip
-            ${{ matrix.artifact }}-lifecycle.tar.gz
-            ${{ matrix.artifact }}-lifecycle.zip
             ${{ matrix.artifact }}-lsp.tar.gz
             ${{ matrix.artifact }}-lsp.zip
 
