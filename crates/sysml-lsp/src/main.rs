@@ -13,6 +13,7 @@ mod rename;
 mod semantic_tokens;
 mod server;
 mod state;
+mod type_hierarchy;
 mod workspace_symbols;
 
 use tower_lsp::{LspService, Server};

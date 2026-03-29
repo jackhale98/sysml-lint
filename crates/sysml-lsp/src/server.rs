@@ -20,6 +20,7 @@ use crate::hover;
 use crate::references;
 use crate::rename;
 use crate::semantic_tokens as sem_tok;
+use crate::type_hierarchy;
 use crate::state::{FileState, WorldState};
 use crate::workspace_symbols;
 
@@ -376,8 +377,18 @@ impl LanguageServer for SysmlLanguageServer {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri_str = params.text_document_position.text_document.uri.to_string();
+        let pos = params.text_document_position.position;
         let Some(file_state) = self.state.files.get(&uri_str) else {
             return Ok(None);
+        };
+
+        // Detect completion context from text before cursor
+        let filter = if let Some(offset) =
+            crate::convert::position_to_offset(&file_state.source, &pos)
+        {
+            completion::detect_context(&file_state.source, offset)
+        } else {
+            completion::CompletionFilter::All
         };
 
         let workspace_defs: Vec<_> = self
@@ -387,7 +398,7 @@ impl LanguageServer for SysmlLanguageServer {
             .map(|entry| entry.value().clone())
             .collect();
 
-        let items = completion::completions(&file_state.model, &workspace_defs);
+        let items = completion::completions(&file_state.model, &workspace_defs, &filter);
         Ok(Some(CompletionResponse::Array(items)))
     }
 
@@ -598,6 +609,90 @@ impl LanguageServer for SysmlLanguageServer {
             .collect();
 
         Ok(rename::rename_symbol(&models_refs, &old_name, &new_name))
+    }
+
+    async fn prepare_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let uri_str = uri.to_string();
+
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+
+        let Some(offset) =
+            crate::convert::position_to_offset(&file_state.source, &pos)
+        else {
+            return Ok(None);
+        };
+
+        // Find name at cursor (definition name or type reference)
+        let name = goto_definition::find_identifier_at_offset(
+            &file_state.model,
+            &file_state.source,
+            offset,
+        )
+        .or_else(|| {
+            find_element_name_at_offset(&file_state.model, &file_state.source, offset)
+        });
+
+        let Some(name) = name else {
+            return Ok(None);
+        };
+
+        let item = type_hierarchy::prepare_type_hierarchy(&file_state.model, &uri, &name);
+        Ok(item.map(|i| vec![i]))
+    }
+
+    async fn supertypes(
+        &self,
+        params: TypeHierarchySupertypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let name = &params.item.name;
+        let models_data: Vec<_> = self
+            .state
+            .files
+            .iter()
+            .map(|e| (e.key().clone(), e.value().model.clone()))
+            .collect();
+        let models_refs: Vec<(&str, &sysml_core::model::Model)> = models_data
+            .iter()
+            .map(|(uri, model)| (uri.as_str(), model))
+            .collect();
+
+        let result = type_hierarchy::supertypes(&models_refs, name);
+        if result.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(result))
+        }
+    }
+
+    async fn subtypes(
+        &self,
+        params: TypeHierarchySubtypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let name = &params.item.name;
+        let models_data: Vec<_> = self
+            .state
+            .files
+            .iter()
+            .map(|e| (e.key().clone(), e.value().model.clone()))
+            .collect();
+        let models_refs: Vec<(&str, &sysml_core::model::Model)> = models_data
+            .iter()
+            .map(|(uri, model)| (uri.as_str(), model))
+            .collect();
+
+        let result = type_hierarchy::subtypes(&models_refs, name);
+        if result.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(result))
+        }
     }
 }
 

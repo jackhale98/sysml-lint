@@ -1,4 +1,5 @@
 use sysml_core::model::{simple_name, Model};
+use sysml_core::sim::rollup::{evaluate_rollup, AggregationMethod};
 
 /// Build a markdown hover string for a definition name in the model.
 pub fn hover_info(model: &Model, name: &str) -> Option<String> {
@@ -34,6 +35,30 @@ pub fn hover_info(model: &Model, name: &str) -> Option<String> {
                 member.push_str(&format!(" `{}`", mult));
             }
             parts.push(member);
+        }
+    }
+
+    // Computed rollups for numeric attributes (if this def has part children)
+    let has_part_children = members.iter().any(|u| u.kind == "part" || u.kind == "item");
+    if has_part_children {
+        let mut rollups = Vec::new();
+        // Find numeric attribute names on this def and its children
+        let attr_names: Vec<String> = members
+            .iter()
+            .filter(|u| matches!(u.kind.as_str(), "attribute" | "feature") && u.value_expr.is_some())
+            .filter(|u| u.value_expr.as_ref().and_then(|e| e.trim().parse::<f64>().ok()).is_some())
+            .map(|u| u.name.clone())
+            .collect();
+        for attr in &attr_names {
+            let result = evaluate_rollup(model, &def.name, attr, AggregationMethod::Sum);
+            if result.total != 0.0 && !result.contributions.is_empty() {
+                rollups.push(format!("- `{}` = {:.4} (sum)", attr, result.total));
+            }
+        }
+        if !rollups.is_empty() {
+            parts.push(String::new());
+            parts.push("**Rollups:**".to_string());
+            parts.extend(rollups);
         }
     }
 
@@ -126,5 +151,30 @@ mod tests {
         let source = "part def Vehicle;\n";
         let model = parse_file("test.sysml", source);
         assert!(hover_info(&model, "Unknown").is_none());
+    }
+
+    #[test]
+    fn hover_shows_rollup() {
+        let source = r#"
+            part def Engine { attribute mass : Real = 180; }
+            part def Vehicle {
+                attribute mass : Real = 50;
+                part engine : Engine;
+            }
+        "#;
+        let model = parse_file("test.sysml", source);
+        let info = hover_info(&model, "Vehicle");
+        assert!(info.is_some());
+        let text = info.unwrap();
+        assert!(
+            text.contains("Rollups:"),
+            "should show rollup section: {}",
+            text
+        );
+        assert!(
+            text.contains("230"),
+            "should show total 230 (50+180): {}",
+            text
+        );
     }
 }
