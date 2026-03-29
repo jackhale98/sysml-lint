@@ -41,13 +41,15 @@ src/
   index.rs                Indexer (populates cache from files)
   interactive.rs          Wizard framework (WizardStep, WizardRunner)
   checks/                 9 validation checks
-  sim/                    Simulation engine
+  sim/                    Simulation and calculation engine
     state_parser.rs       State machine model extraction
     state_sim.rs          State machine simulation
     action_parser.rs      Action flow model extraction
     action_exec.rs        Action flow execution
     constraint_eval.rs    Constraint/calculation evaluation
     expr.rs               Expression types and environment
+    resolve.rs            Attribute resolution across part hierarchy
+    rollup.rs             Generic rollup engine (sum, RSS, product, min, max)
   codegen/                Code generation and editing
     template.rs           SysML definition template generation
     edit.rs               Byte-accurate surgical text edits

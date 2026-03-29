@@ -11,6 +11,7 @@ pub mod export;
 pub mod fmt;
 pub mod remove;
 pub mod rename;
+pub mod rollup;
 pub mod stats;
 pub mod deps;
 pub mod diff;

@@ -182,6 +182,46 @@ fn eval_function(name: &str, args: &[Value]) -> Result<Value, EvalError> {
             }
             Ok(Value::Number(total))
         }
+        "product" => {
+            if args.is_empty() {
+                return Err(EvalError::new("product requires at least 1 argument"));
+            }
+            let mut result = 1.0;
+            for a in args {
+                result *= require_number(name, a)?;
+            }
+            Ok(Value::Number(result))
+        }
+        "mean" | "avg" => {
+            if args.is_empty() {
+                return Err(EvalError::new("mean requires at least 1 argument"));
+            }
+            let mut total = 0.0;
+            for a in args {
+                total += require_number(name, a)?;
+            }
+            Ok(Value::Number(total / args.len() as f64))
+        }
+        "rss" => {
+            // Root-sum-of-squares: sqrt(a^2 + b^2 + c^2 + ...)
+            if args.is_empty() {
+                return Err(EvalError::new("rss requires at least 1 argument"));
+            }
+            let mut sum_sq = 0.0;
+            for a in args {
+                let n = require_number(name, a)?;
+                sum_sq += n * n;
+            }
+            Ok(Value::Number(sum_sq.sqrt()))
+        }
+        "count" => Ok(Value::Number(args.len() as f64)),
+        "clamp" => {
+            require_args(name, args, 3)?;
+            let v = require_number(name, &args[0])?;
+            let lo = require_number(name, &args[1])?;
+            let hi = require_number(name, &args[2])?;
+            Ok(Value::Number(v.max(lo).min(hi)))
+        }
         _ => Err(EvalError::new(format!("unknown function `{}`", name))),
     }
 }
@@ -456,6 +496,84 @@ mod tests {
         assert_eq!(
             evaluate(&call("round", vec![num(3.5)]), &empty_env()).unwrap(),
             Value::Number(4.0)
+        );
+    }
+
+    #[test]
+    fn eval_product() {
+        assert_eq!(
+            evaluate(&call("product", vec![num(2.0), num(3.0), num(4.0)]), &empty_env()).unwrap(),
+            Value::Number(24.0)
+        );
+    }
+
+    #[test]
+    fn eval_product_single() {
+        assert_eq!(
+            evaluate(&call("product", vec![num(7.0)]), &empty_env()).unwrap(),
+            Value::Number(7.0)
+        );
+    }
+
+    #[test]
+    fn eval_mean() {
+        assert_eq!(
+            evaluate(&call("mean", vec![num(2.0), num(4.0), num(6.0)]), &empty_env()).unwrap(),
+            Value::Number(4.0)
+        );
+    }
+
+    #[test]
+    fn eval_avg_alias() {
+        assert_eq!(
+            evaluate(&call("avg", vec![num(10.0), num(20.0)]), &empty_env()).unwrap(),
+            Value::Number(15.0)
+        );
+    }
+
+    #[test]
+    fn eval_rss() {
+        // sqrt(3^2 + 4^2) = 5
+        let result = evaluate(&call("rss", vec![num(3.0), num(4.0)]), &empty_env()).unwrap();
+        assert_eq!(result, Value::Number(5.0));
+    }
+
+    #[test]
+    fn eval_rss_three_values() {
+        // sqrt(1^2 + 2^2 + 2^2) = 3
+        let result = evaluate(&call("rss", vec![num(1.0), num(2.0), num(2.0)]), &empty_env()).unwrap();
+        assert_eq!(result, Value::Number(3.0));
+    }
+
+    #[test]
+    fn eval_count() {
+        assert_eq!(
+            evaluate(&call("count", vec![num(1.0), num(2.0), num(3.0)]), &empty_env()).unwrap(),
+            Value::Number(3.0)
+        );
+    }
+
+    #[test]
+    fn eval_count_empty() {
+        assert_eq!(
+            evaluate(&call("count", vec![]), &empty_env()).unwrap(),
+            Value::Number(0.0)
+        );
+    }
+
+    #[test]
+    fn eval_clamp() {
+        assert_eq!(
+            evaluate(&call("clamp", vec![num(15.0), num(0.0), num(10.0)]), &empty_env()).unwrap(),
+            Value::Number(10.0)
+        );
+        assert_eq!(
+            evaluate(&call("clamp", vec![num(-5.0), num(0.0), num(10.0)]), &empty_env()).unwrap(),
+            Value::Number(0.0)
+        );
+        assert_eq!(
+            evaluate(&call("clamp", vec![num(5.0), num(0.0), num(10.0)]), &empty_env()).unwrap(),
+            Value::Number(5.0)
         );
     }
 

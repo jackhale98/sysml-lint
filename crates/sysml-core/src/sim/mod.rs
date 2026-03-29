@@ -12,4 +12,6 @@ pub mod expr;
 pub mod expr_parser;
 pub mod state_machine;
 pub mod state_parser;
+pub mod resolve;
+pub mod rollup;
 pub mod state_sim;

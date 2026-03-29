@@ -591,6 +591,23 @@ pub(crate) enum Command {
         /// Topic to display (omit to list all topics).
         topic: Option<String>,
     },
+    /// Compute attribute rollups over the part hierarchy.
+    ///
+    /// Walks the composition tree starting from a root definition,
+    /// resolves attribute values, and aggregates them. Works for any
+    /// numeric attribute: mass, cost, power, tolerance, etc.
+    ///
+    /// SUBCOMMANDS: compute, budget, sensitivity, query
+    ///
+    /// EXAMPLES:
+    ///   sysml rollup compute model.sysml --root Vehicle --attr mass
+    ///   sysml rollup budget model.sysml --root Vehicle --attr mass --limit 2000
+    ///   sysml rollup sensitivity model.sysml --root Vehicle --attr mass
+    ///   sysml rollup query model.sysml --attr mass
+    Rollup {
+        #[command(subcommand)]
+        kind: RollupCommand,
+    },
     /// Run named validation pipelines defined in .sysml/config.toml.
     ///
     /// Pipelines are sequences of sysml commands that run in order.
@@ -764,5 +781,82 @@ pub(crate) enum PipelineCommand {
         /// Pipeline name.
         #[arg(required = true)]
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum RollupCommand {
+    /// Compute an attribute rollup from a root definition.
+    ///
+    /// Aggregates a named attribute across the part hierarchy using
+    /// sum (default), RSS, product, min, or max.
+    ///
+    /// EXAMPLES:
+    ///   sysml rollup compute model.sysml --root Vehicle --attr mass
+    ///   sysml rollup compute model.sysml --root Vehicle --attr mass --method rss
+    Compute {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Root part definition to start from.
+        #[arg(long, required = true)]
+        root: String,
+        /// Attribute name to aggregate (e.g., mass, cost, power).
+        #[arg(long, required = true)]
+        attr: String,
+        /// Aggregation method: sum, rss, product, min, max.
+        #[arg(long, default_value = "sum")]
+        method: String,
+    },
+    /// Check an attribute rollup against a budget limit.
+    ///
+    /// Computes the rollup and exits with error if total exceeds limit.
+    /// Use in CI to enforce budgets.
+    ///
+    /// EXAMPLES:
+    ///   sysml rollup budget model.sysml --root Vehicle --attr mass --limit 2000
+    Budget {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Root part definition.
+        #[arg(long, required = true)]
+        root: String,
+        /// Attribute name.
+        #[arg(long, required = true)]
+        attr: String,
+        /// Budget limit value.
+        #[arg(long, required = true)]
+        limit: f64,
+        /// Aggregation method: sum, rss, product, min, max.
+        #[arg(long, default_value = "sum")]
+        method: String,
+    },
+    /// Show which children contribute most to a rollup total.
+    ///
+    /// EXAMPLES:
+    ///   sysml rollup sensitivity model.sysml --root Vehicle --attr mass
+    Sensitivity {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Root part definition.
+        #[arg(long, required = true)]
+        root: String,
+        /// Attribute name.
+        #[arg(long, required = true)]
+        attr: String,
+    },
+    /// Find all occurrences of an attribute across the model.
+    ///
+    /// EXAMPLES:
+    ///   sysml rollup query model.sysml --attr mass
+    Query {
+        /// SysML v2 files to analyze.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Attribute name to search for.
+        #[arg(long, required = true)]
+        attr: String,
     },
 }

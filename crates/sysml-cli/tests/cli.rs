@@ -835,3 +835,110 @@ fn pipeline_create_adds_to_config() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+// ========================================================================
+// rollup
+// ========================================================================
+
+#[test]
+fn rollup_compute_mass() {
+    cmd()
+        .args(["rollup", "compute", &fixture("rollup-vehicle.sysml"),
+               "--root", "Vehicle", "--attr", "mass"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("900"));
+}
+
+#[test]
+fn rollup_compute_cost() {
+    cmd()
+        .args(["rollup", "compute", &fixture("rollup-vehicle.sysml"),
+               "--root", "Vehicle", "--attr", "cost"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("17300"));
+}
+
+#[test]
+fn rollup_compute_json() {
+    cmd()
+        .args(["-f", "json", "rollup", "compute", &fixture("rollup-vehicle.sysml"),
+               "--root", "Vehicle", "--attr", "mass"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"total\": 900"));
+}
+
+#[test]
+fn rollup_compute_rss() {
+    cmd()
+        .args(["rollup", "compute", &fixture("rollup-vehicle.sysml"),
+               "--root", "Vehicle", "--attr", "mass", "--method", "rss"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rss"));
+}
+
+#[test]
+fn rollup_budget_pass() {
+    cmd()
+        .args(["rollup", "budget", &fixture("rollup-vehicle.sysml"),
+               "--root", "Vehicle", "--attr", "mass", "--limit", "1000"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PASS"));
+}
+
+#[test]
+fn rollup_budget_fail() {
+    cmd()
+        .args(["rollup", "budget", &fixture("rollup-vehicle.sysml"),
+               "--root", "Vehicle", "--attr", "mass", "--limit", "500"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("FAIL"));
+}
+
+#[test]
+fn rollup_sensitivity() {
+    cmd()
+        .args(["rollup", "sensitivity", &fixture("rollup-vehicle.sysml"),
+               "--root", "Vehicle", "--attr", "mass"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("body"))
+        .stdout(predicate::str::contains("44.4%"));
+}
+
+#[test]
+fn rollup_query() {
+    cmd()
+        .args(["rollup", "query", &fixture("rollup-vehicle.sysml"),
+               "--attr", "mass"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Engine"))
+        .stdout(predicate::str::contains("Wheel"))
+        .stdout(predicate::str::contains("Vehicle"));
+}
+
+#[test]
+fn rollup_unknown_root() {
+    cmd()
+        .args(["rollup", "compute", &fixture("rollup-vehicle.sysml"),
+               "--root", "NonExistent", "--attr", "mass"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
+
+#[test]
+fn rollup_unknown_method() {
+    cmd()
+        .args(["rollup", "compute", &fixture("rollup-vehicle.sysml"),
+               "--root", "Vehicle", "--attr", "mass", "--method", "bogus"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown aggregation"));
+}

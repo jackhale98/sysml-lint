@@ -216,6 +216,30 @@ BatteryLife          PowerSupply          TestBatteryLife
 Coverage: 3/3 satisfied (100%), 2/3 verified (67%)
 ```
 
+### Attribute rollups — mass, cost, power, tolerance budgets
+
+Compute any numeric attribute across the part hierarchy. Works for mass budgets, cost rollups, power budgets, tolerance stackups — anything with a numeric attribute:
+
+```sh
+$ sysml rollup compute model.sysml --root Vehicle --attr mass
+Rollup: mass (sum) for Vehicle
+  Vehicle                                   total: 900.0000
+    (own)                                        20.0000
+    engine : Engine       180.0000 => 180.0000 (20.0%)
+    chassis : Chassis     250.0000 => 250.0000 (27.8%)
+    wheels : Wheel [4]     12.5000 =>  50.0000 (5.6%)
+    body : Body           400.0000 => 400.0000 (44.4%)
+
+$ sysml rollup budget model.sysml --root Vehicle --attr mass --limit 1000
+Budget: mass for Vehicle
+  Total:  900.0000
+  Limit:  1000.0000
+  Margin: 100.0000 (10.0%)
+  Status: PASS
+```
+
+Aggregation methods: `sum` (default), `rss` (tolerance stackups), `product`, `min`, `max`. Use `--format json` for CI integration.
+
 ### Semantic diff — compare models, not text
 
 ```sh
@@ -256,33 +280,34 @@ sysml pipeline run ci
 |---------|-------------|------|
 | **Editing** | | [editing](docs/commands/editing.md) |
 | `add` | Add elements interactively, to a file, or to stdout | |
-| `remove` | Remove an element from a SysML file | |
+| `remove` (`rm`) | Remove an element from a SysML file | |
 | `rename` | Rename an element and update all references | |
-| `example` | Generate example projects with teaching comments | |
 | `fmt` | Format SysML v2 source files | |
 | **Analysis** | | [analysis](docs/commands/analysis.md) |
-| `lint` | Validate SysML v2 files against structural rules | |
+| `check` | Validate models against structural rules (also: `lint`) | |
 | `list` (`ls`) | List model elements with filters | |
 | `show` | Show detailed element information | |
-| `check` | Validate models and project integrity | |
 | `trace` | Requirements traceability matrix | |
 | `interfaces` | Analyze port interfaces and connections | |
 | `deps` | Dependency analysis for an element | |
 | `diff` | Semantic diff between two SysML files | |
-| `allocation` | Logical-to-physical allocation matrix | |
+| `allocation` (`alloc`) | Logical-to-physical allocation matrix | |
 | `coverage` | Model quality and completeness report | |
 | `stats` | Aggregate model statistics | |
+| **Rollups** | | |
+| `rollup compute` | Aggregate any attribute over the part hierarchy (sum, RSS, min, max) | |
+| `rollup budget` | Check a rollup total against a limit (CI gate) | |
+| `rollup sensitivity` | Rank children by contribution to a rollup | |
+| `rollup query` | Find all instances of an attribute across the model | |
 | **Diagrams** | | [diagrams](docs/commands/diagrams.md) |
 | `diagram` | Generate diagrams (bdd, ibd, stm, act, req, pkg, par, trace, alloc, ucd) | |
 | **Simulation & Export** | | [simulation](docs/commands/simulation.md) |
-| `simulate` | Evaluate constraints, state machines, action flows | |
+| `simulate` (`sim`) | Evaluate constraints, state machines, action flows | |
 | `export` | Export FMI 3.0, Modelica, SSP artifacts | |
 | **Project** | | [project](docs/commands/project.md) |
 | `init` | Initialize a `.sysml/` project | |
 | `index` | Build or rebuild project index | |
 | `pipeline` | Run named validation pipelines from config | |
-| `report` | Cross-domain reports (dashboard, traceability, gate) | |
-| `guide` | Built-in help topics and tutorials | |
 | `completions` | Generate shell completion scripts | |
 | **Language Server** | | [editor setup](docs/ci-integration.md#language-server-sysml-lsp) |
 | `sysml-lsp` | LSP server with 13 capabilities: diagnostics, go-to-def, references, hover, completions, outline, workspace symbols, semantic highlighting, code actions, formatting, document highlight, folding, rename | |
