@@ -585,6 +585,25 @@ pub(crate) enum Command {
         /// Topic to display (omit to list all topics).
         topic: Option<String>,
     },
+    /// Search model elements by name pattern.
+    ///
+    /// Finds definitions, usages, and type references matching a
+    /// substring or regex pattern across all model files.
+    ///
+    /// EXAMPLES:
+    ///   sysml find model.sysml --pattern Engine
+    ///   sysml find --pattern "mass|weight"
+    ///   sysml find --pattern ".*Controller" --kind definitions
+    Find {
+        /// SysML v2 files to search (omit to scan project).
+        files: Vec<PathBuf>,
+        /// Pattern to match (substring or regex).
+        #[arg(short, long, required = true)]
+        pattern: String,
+        /// Restrict search: definitions, usages, all (default: all).
+        #[arg(short, long, default_value = "all")]
+        kind: String,
+    },
     /// Run analysis cases defined in SysML v2 models.
     ///
     /// Lists, executes, and compares analysis cases. Supports trade studies

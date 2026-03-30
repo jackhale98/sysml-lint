@@ -1009,3 +1009,52 @@ fn analyze_unknown_name() {
         .failure()
         .stderr(predicate::str::contains("not found"));
 }
+
+// ========================================================================
+// find
+// ========================================================================
+
+#[test]
+fn find_by_name() {
+    cmd()
+        .args(["find", &fixture("rollup-vehicle.sysml"), "--pattern", "Engine"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Engine"));
+}
+
+#[test]
+fn find_by_attribute() {
+    cmd()
+        .args(["find", &fixture("rollup-vehicle.sysml"), "--pattern", "mass"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("5 match"));
+}
+
+#[test]
+fn find_defs_only() {
+    cmd()
+        .args(["find", &fixture("rollup-vehicle.sysml"), "--pattern", "Engine", "--kind", "defs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 match"));
+}
+
+#[test]
+fn find_no_matches() {
+    cmd()
+        .args(["find", &fixture("rollup-vehicle.sysml"), "--pattern", "nonexistent"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("No matches"));
+}
+
+#[test]
+fn find_json() {
+    cmd()
+        .args(["-f", "json", "find", &fixture("rollup-vehicle.sysml"), "--pattern", "Vehicle"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"Vehicle\""));
+}
