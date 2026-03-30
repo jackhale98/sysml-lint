@@ -59,8 +59,8 @@ fn main() -> ExitCode {
         Command::Remove { file, name, dry_run } => {
             commands::remove::run(file, name, *dry_run)
         }
-        Command::Rename { file, old_name, new_name, dry_run } => {
-            commands::rename::run(file, old_name, new_name, *dry_run)
+        Command::Rename { file, old_name, new_name, dry_run, project } => {
+            commands::rename::run(file, old_name, new_name, *dry_run, *project)
         }
         Command::Fmt { files, check, diff, indent_width } => {
             commands::fmt::run(files, *check, *diff, *indent_width)
@@ -70,8 +70,8 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Stats { files } => commands::stats::run(&cli, files),
-        Command::Deps { files, target, reverse, forward } => {
-            commands::deps::run(&cli, files, target, *reverse, *forward)
+        Command::Deps { files, target, reverse, forward, transitive } => {
+            commands::deps::run(&cli, files, target, *reverse, *forward, *transitive)
         }
         Command::Diff { file_a, file_b } => commands::diff::run(&cli, file_a, file_b),
         Command::Allocation { files, check, unallocated } => {

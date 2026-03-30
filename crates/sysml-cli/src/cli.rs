@@ -387,7 +387,7 @@ pub(crate) enum Command {
     ///   sysml rename model.sysml Engine Motor
     ///   sysml rename model.sysml Engine Motor --dry-run
     Rename {
-        /// Target SysML file.
+        /// Target SysML file (or first file for --project).
         #[arg(required = true)]
         file: PathBuf,
 
@@ -402,6 +402,10 @@ pub(crate) enum Command {
         /// Preview changes without writing.
         #[arg(long)]
         dry_run: bool,
+
+        /// Rename across all project files (not just the specified file).
+        #[arg(long)]
+        project: bool,
     },
     /// Format SysML v2 files.
     ///
@@ -465,6 +469,9 @@ pub(crate) enum Command {
         /// Show only forward dependencies (what this element depends on).
         #[arg(long)]
         forward: bool,
+        /// Include transitive dependencies (follow chains).
+        #[arg(long)]
+        transitive: bool,
     },
     /// Semantic diff between two SysML v2 files.
     ///
