@@ -9,6 +9,7 @@ use sysml_core::parser;
 
 use crate::code_actions;
 use crate::completion;
+use crate::inlay_hints;
 use crate::convert::span_to_range;
 use crate::diagnostics;
 use crate::document_highlight;
@@ -142,6 +143,7 @@ impl LanguageServer for SysmlLanguageServer {
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -448,10 +450,12 @@ impl LanguageServer for SysmlLanguageServer {
             .files
             .get(&uri_str)
             .map(|fs| fs.source.clone());
+        let workspace_names = self.workspace_def_names();
         let actions = code_actions::code_actions(
             &uri,
             &params.context.diagnostics,
             source.as_deref(),
+            Some(&workspace_names),
         );
         if actions.is_empty() {
             Ok(None)
@@ -609,6 +613,22 @@ impl LanguageServer for SysmlLanguageServer {
             .collect();
 
         Ok(rename::rename_symbol(&models_refs, &old_name, &new_name))
+    }
+
+    async fn inlay_hint(
+        &self,
+        params: InlayHintParams,
+    ) -> Result<Option<Vec<InlayHint>>> {
+        let uri_str = params.text_document.uri.to_string();
+        let Some(file_state) = self.state.files.get(&uri_str) else {
+            return Ok(None);
+        };
+        let hints = inlay_hints::inlay_hints(&file_state.model);
+        if hints.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(hints))
+        }
     }
 
     async fn prepare_type_hierarchy(

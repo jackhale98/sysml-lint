@@ -6,10 +6,12 @@ use tower_lsp::lsp_types::{
 use std::collections::HashMap;
 
 /// Extract quick-fix code actions from diagnostics in the given range.
+/// `workspace_names` enables "add import" suggestions for unresolved types.
 pub fn code_actions(
     uri: &Url,
     diagnostics: &[lsp_types::Diagnostic],
     source: Option<&str>,
+    workspace_names: Option<&[String]>,
 ) -> Vec<CodeAction> {
     let mut actions = Vec::new();
 
@@ -65,9 +67,58 @@ pub fn code_actions(
                 });
             }
         }
+
+        // "Add import" for W004 (unresolved type) when the type exists in workspace
+        if diag.code == Some(NumberOrString::String("W004".to_string())) {
+            if let Some(ws_names) = workspace_names {
+                if let Some(type_name) = extract_backtick_name(&diag.message) {
+                    if ws_names.iter().any(|n| n == type_name) {
+                        if let Some(source) = source {
+                            // Insert import at the top of the file (after any existing imports)
+                            let insert_line = find_import_insert_line(source);
+                            let import_text = format!("import {}::*;\n", type_name);
+                            let mut changes = HashMap::new();
+                            changes.insert(
+                                uri.clone(),
+                                vec![TextEdit {
+                                    range: Range::new(
+                                        Position::new(insert_line, 0),
+                                        Position::new(insert_line, 0),
+                                    ),
+                                    new_text: import_text,
+                                }],
+                            );
+                            actions.push(CodeAction {
+                                title: format!("Add import for `{}`", type_name),
+                                kind: Some(CodeActionKind::QUICKFIX),
+                                diagnostics: Some(vec![diag.clone()]),
+                                edit: Some(WorkspaceEdit {
+                                    changes: Some(changes),
+                                    ..Default::default()
+                                }),
+                                is_preferred: Some(false),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
 
     actions
+}
+
+/// Find the line number to insert a new import statement.
+fn find_import_insert_line(source: &str) -> u32 {
+    let mut last_import_line = 0u32;
+    for (i, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("import ") || trimmed.starts_with("private import ") {
+            last_import_line = (i + 1) as u32;
+        }
+    }
+    last_import_line
 }
 
 /// Parse a "did you mean `X`?" suggestion from a diagnostic message.
@@ -158,7 +209,7 @@ mod tests {
             "type `Vehicel` is not defined\nSuggestion: did you mean `Vehicle`?",
             1, 15, 22,
         )];
-        let actions = code_actions(&uri, &diags, None);
+        let actions = code_actions(&uri, &diags, None, None);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].title, "Replace with `Vehicle`");
         assert_eq!(actions[0].kind, Some(CodeActionKind::QUICKFIX));
@@ -177,7 +228,7 @@ mod tests {
             message: "part def `Unused` is defined but never referenced".to_string(),
             ..Default::default()
         };
-        let actions = code_actions(&uri, &[diag], Some(source));
+        let actions = code_actions(&uri, &[diag], Some(source), None);
         let remove: Vec<_> = actions.iter().filter(|a| a.title.contains("Remove")).collect();
         assert_eq!(remove.len(), 1);
         assert!(remove[0].title.contains("Unused"));
@@ -195,7 +246,7 @@ mod tests {
     fn no_actions_for_diag_without_suggestion() {
         let uri = Url::parse("file:///test.sysml").unwrap();
         let diags = vec![make_diag("E002", "duplicate definition `A`", 0, 0, 10)];
-        let actions = code_actions(&uri, &diags, None);
+        let actions = code_actions(&uri, &diags, None, None);
         assert!(actions.is_empty());
     }
 
@@ -206,7 +257,7 @@ mod tests {
             make_diag("W004", "Suggestion: did you mean `Vehicle`?", 1, 15, 22),
             make_diag("W004", "Suggestion: did you mean `Engine`?", 2, 15, 21),
         ];
-        let actions = code_actions(&uri, &diags, None);
+        let actions = code_actions(&uri, &diags, None, None);
         assert_eq!(actions.len(), 2);
     }
 
@@ -220,7 +271,7 @@ mod tests {
         let diags = compute_diagnostics(&model, &[]);
 
         let uri = Url::parse("file:///test.sysml").unwrap();
-        let actions = code_actions(&uri, &diags, Some(source));
+        let actions = code_actions(&uri, &diags, Some(source), None);
 
         let fixes: Vec<_> = actions
             .iter()
