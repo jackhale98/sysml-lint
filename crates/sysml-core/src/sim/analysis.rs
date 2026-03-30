@@ -298,6 +298,152 @@ pub fn format_analysis_list(cases: &[AnalysisCaseModel]) -> String {
     out
 }
 
+// =========================================================================
+// Evaluation
+// =========================================================================
+
+/// Result of evaluating an analysis case.
+#[derive(Debug, Clone)]
+pub struct AnalysisResult {
+    pub name: String,
+    pub subject_name: Option<String>,
+    pub bindings: Vec<(String, f64)>,
+    pub return_value: Option<f64>,
+}
+
+/// Result of a trade study evaluation.
+#[derive(Debug, Clone)]
+pub struct TradeResult {
+    pub name: String,
+    pub objective: ObjectiveKind,
+    pub alternatives: Vec<AlternativeScore>,
+    pub winner: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AlternativeScore {
+    pub name: String,
+    pub score: Option<f64>,
+    pub overrides: Vec<(String, String)>,
+}
+
+/// Evaluate an analysis case using attribute values from the model.
+/// Binds the subject's attributes, evaluates local bindings and return expr.
+pub fn evaluate_analysis(
+    model: &Model,
+    case: &AnalysisCaseModel,
+    extra_bindings: &crate::sim::expr::Env,
+) -> AnalysisResult {
+    use crate::sim::expr::{Env, Value};
+    use crate::sim::resolve::find_attribute_value;
+
+    let mut env = extra_bindings.clone();
+    let mut computed_bindings = Vec::new();
+
+    // Bind subject attributes if subject has a type
+    if let Some(ref subj) = case.subject {
+        if let Some(ref type_ref) = subj.type_ref {
+            let type_name = crate::model::simple_name(type_ref);
+            // Find all attribute values on the subject's type
+            for usage in &model.usages {
+                if usage.parent_def.as_deref() == Some(type_name)
+                    && matches!(usage.kind.as_str(), "attribute" | "feature")
+                {
+                    if let Some(ref val_expr) = usage.value_expr {
+                        if let Ok(v) = val_expr.trim().parse::<f64>() {
+                            env.bind(usage.name.clone(), Value::Number(v));
+                            // Also bind as subject.attr
+                            env.bind(format!("{}.{}", subj.name, usage.name), Value::Number(v));
+                        }
+                    }
+                }
+            }
+            // Also resolve via rollup for nested parts
+            if let Some(val) = find_attribute_value(model, type_name, "mass") {
+                env.bind("mass".to_string(), Value::Number(val));
+            }
+        }
+    }
+
+    // Evaluate local bindings in order
+    for binding in &case.local_bindings {
+        if let Ok(v) = binding.value_expr.trim().parse::<f64>() {
+            env.bind(binding.name.clone(), Value::Number(v));
+            computed_bindings.push((binding.name.clone(), v));
+        } else if let Some(val) = env.get(&binding.value_expr).and_then(|v| v.as_number()) {
+            env.bind(binding.name.clone(), Value::Number(val));
+            computed_bindings.push((binding.name.clone(), val));
+        }
+    }
+
+    // Evaluate return expression
+    let return_value = case.return_decl.as_ref().and_then(|ret| {
+        if let Some(ref expr) = ret.value_expr {
+            if let Ok(v) = expr.trim().parse::<f64>() {
+                return Some(v);
+            }
+            // Try looking up in env
+            env.get(expr.trim()).and_then(|v| v.as_number())
+        } else {
+            None
+        }
+    });
+
+    AnalysisResult {
+        name: case.name.clone(),
+        subject_name: case.subject.as_ref().map(|s| s.name.clone()),
+        bindings: computed_bindings,
+        return_value,
+    }
+}
+
+/// Evaluate a trade study: score each alternative and pick the best.
+pub fn evaluate_trade_study(
+    _model: &Model,
+    case: &AnalysisCaseModel,
+) -> TradeResult {
+    let objective = case.objective.as_ref()
+        .map(|o| o.kind.clone())
+        .unwrap_or(ObjectiveKind::General);
+
+    let alt_scores: Vec<AlternativeScore> = case.alternatives.iter().map(|alt| {
+        // Try to compute a score from overrides
+        // Look for numeric overrides that could serve as evaluation criteria
+        let score = alt.overrides.iter()
+            .find(|(k, _)| k.contains("cost") || k.contains("mass") || k.contains("eval"))
+            .and_then(|(_, v)| v.trim().parse::<f64>().ok());
+
+        AlternativeScore {
+            name: alt.name.clone(),
+            score,
+            overrides: alt.overrides.clone(),
+        }
+    }).collect();
+
+    let winner = match objective {
+        ObjectiveKind::Maximize => {
+            alt_scores.iter()
+                .filter_map(|a| a.score.map(|s| (a.name.clone(), s)))
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .map(|(name, _)| name)
+        }
+        ObjectiveKind::Minimize => {
+            alt_scores.iter()
+                .filter_map(|a| a.score.map(|s| (a.name.clone(), s)))
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .map(|(name, _)| name)
+        }
+        ObjectiveKind::General => None,
+    };
+
+    TradeResult {
+        name: case.name.clone(),
+        objective,
+        alternatives: alt_scores,
+        winner,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,5 +577,69 @@ mod tests {
         // Should find both the def and the usage
         assert!(cases.len() >= 1);
         assert!(cases.iter().any(|c| c.name == "FuelStudy"));
+    }
+
+    // --- Evaluation tests ---
+
+    #[test]
+    fn evaluate_with_subject_bindings() {
+        let source = r#"
+            part def Vehicle {
+                attribute mass : Real = 1500;
+                attribute power : Real = 200;
+            }
+            analysis def PowerToWeight {
+                subject v : Vehicle;
+                attribute ratio : Real = 7.5;
+                return result : Real;
+            }
+        "#;
+        let model = parser::parse_file("test.sysml", source);
+        let cases = extract_analysis_cases_from_model(&model);
+        let case = &cases[0];
+        let env = crate::sim::expr::Env::new();
+        let result = evaluate_analysis(&model, case, &env);
+        assert_eq!(result.name, "PowerToWeight");
+        // Should have resolved local binding
+        assert!(!result.bindings.is_empty() || result.return_value.is_some(),
+            "should have computed something: bindings={:?}, return={:?}",
+            result.bindings, result.return_value);
+    }
+
+    #[test]
+    fn evaluate_with_extra_bindings() {
+        let source = r#"
+            part def System;
+            analysis def CostAnalysis {
+                subject s : System;
+                return totalCost : Real;
+            }
+        "#;
+        let model = parser::parse_file("test.sysml", source);
+        let cases = extract_analysis_cases_from_model(&model);
+        let case = &cases[0];
+        let mut env = crate::sim::expr::Env::new();
+        env.bind("totalCost", crate::sim::expr::Value::Number(42.0));
+        let result = evaluate_analysis(&model, case, &env);
+        assert_eq!(result.name, "CostAnalysis");
+    }
+
+    #[test]
+    fn trade_study_with_maximize() {
+        let source = r#"
+            part def Engine { attribute mass : Real; attribute cost : Real; }
+            analysis def EngineStudy {
+                subject e : Engine;
+                objective : MaximizeObjective;
+                part engine4cyl : Engine;
+                part engine6cyl : Engine;
+            }
+        "#;
+        let model = parser::parse_file("test.sysml", source);
+        let cases = extract_analysis_cases_from_model(&model);
+        let case = &cases[0];
+        let result = evaluate_trade_study(&model, case);
+        assert_eq!(result.alternatives.len(), 2);
+        assert_eq!(result.objective, ObjectiveKind::Maximize);
     }
 }

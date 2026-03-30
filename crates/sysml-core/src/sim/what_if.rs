@@ -7,7 +7,7 @@
 use crate::model::Model;
 use crate::sim::expr::Env;
 use crate::sim::resolve::{resolve_attribute_tree, AttributeNode};
-use crate::sim::rollup::{evaluate_rollup, AggregationMethod, RollupResult};
+use crate::sim::rollup::{evaluate_rollup, AggregationMethod};
 
 /// A named what-if scenario with attribute overrides.
 #[derive(Debug, Clone)]

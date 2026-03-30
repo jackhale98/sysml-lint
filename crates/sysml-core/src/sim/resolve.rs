@@ -114,7 +114,7 @@ fn resolve_children(
 
 /// Find the value of a named attribute within a definition.
 /// Checks attribute usages and feature usages with matching names.
-fn find_attribute_value(model: &Model, def_name: &str, attr_name: &str) -> Option<f64> {
+pub fn find_attribute_value(model: &Model, def_name: &str, attr_name: &str) -> Option<f64> {
     // Check direct usages in this definition
     for usage in model.usages_in_def(def_name) {
         if usage.name == attr_name

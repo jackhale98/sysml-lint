@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use sysml_core::parser as sysml_parser;
 use sysml_core::sim::analysis::{
+    evaluate_analysis, evaluate_trade_study,
     extract_analysis_cases_from_model, format_analysis_list, AnalysisCaseModel,
 };
 
@@ -119,7 +120,9 @@ fn run_execute(
 
     let env = crate::parse_bindings(bindings);
 
-    // Report what we know about the analysis case
+    // Evaluate the analysis case
+    let eval_result = evaluate_analysis(&model, case, &env);
+
     match cli.format.as_str() {
         "json" => {
             let json = serde_json::json!({
@@ -135,12 +138,10 @@ fn run_execute(
                         "bound_value": val,
                     })
                 }).collect::<Vec<_>>(),
-                "local_bindings": case.local_bindings.iter().map(|b| {
-                    serde_json::json!({
-                        "name": b.name,
-                        "expression": b.value_expr,
-                    })
+                "computed_bindings": eval_result.bindings.iter().map(|(n, v)| {
+                    serde_json::json!({"name": n, "value": v})
                 }).collect::<Vec<_>>(),
+                "return_value": eval_result.return_value,
                 "return": case.return_decl.as_ref().map(|r| serde_json::json!({
                     "name": r.name,
                     "type": r.type_ref,
@@ -188,9 +189,18 @@ fn run_execute(
             for binding in &case.local_bindings {
                 println!("  {} = {}", binding.name, binding.value_expr);
             }
+            if !eval_result.bindings.is_empty() {
+                println!("  Computed:");
+                for (name, val) in &eval_result.bindings {
+                    println!("    {} = {:.4}", name, val);
+                }
+            }
             if let Some(ref ret) = case.return_decl {
+                let computed = eval_result.return_value
+                    .map(|v| format!(" => {:.4}", v))
+                    .unwrap_or_default();
                 println!(
-                    "  Return: {}{}{}",
+                    "  Return: {}{}{}{}",
                     ret.name,
                     ret.type_ref
                         .as_ref()
@@ -200,6 +210,7 @@ fn run_execute(
                         .as_ref()
                         .map(|e| format!(" = {}", e))
                         .unwrap_or_default(),
+                    computed,
                 );
             }
         }
@@ -227,43 +238,38 @@ fn run_trade(cli: &Cli, files: &[PathBuf], name: Option<&str>) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    let trade = evaluate_trade_study(&model, case);
+
     match cli.format.as_str() {
         "json" => {
-            let alts: Vec<_> = case
-                .alternatives
-                .iter()
-                .map(|a| {
+            let json = serde_json::json!({
+                "analysis": trade.name,
+                "objective": format!("{:?}", trade.objective),
+                "winner": trade.winner,
+                "alternatives": trade.alternatives.iter().map(|a| {
                     serde_json::json!({
                         "name": a.name,
-                        "type": a.type_ref,
+                        "score": a.score,
                         "overrides": a.overrides.iter().map(|(k, v)| {
                             serde_json::json!({"attribute": k, "value": v})
                         }).collect::<Vec<_>>(),
                     })
-                })
-                .collect();
-            let json = serde_json::json!({
-                "analysis": case.name,
-                "objective": case.objective.as_ref().map(|o| format!("{:?}", o.kind)),
-                "alternatives": alts,
+                }).collect::<Vec<_>>(),
             });
             println!("{}", serde_json::to_string_pretty(&json).unwrap());
         }
         _ => {
-            println!("Trade Study: {}", case.name);
-            if let Some(ref obj) = case.objective {
-                println!("  Objective: {:?}", obj.kind);
+            println!("Trade Study: {}", trade.name);
+            println!("  Objective: {:?}", trade.objective);
+            if let Some(ref winner) = trade.winner {
+                println!("  Winner: {}", winner);
             }
             println!();
-            for alt in &case.alternatives {
-                println!(
-                    "  Alternative: {}{}",
-                    alt.name,
-                    alt.type_ref
-                        .as_ref()
-                        .map(|t| format!(" : {}", t))
-                        .unwrap_or_default(),
-                );
+            for alt in &trade.alternatives {
+                let score_str = alt.score
+                    .map(|s| format!(" (score: {:.4})", s))
+                    .unwrap_or_default();
+                println!("  Alternative: {}{}", alt.name, score_str);
                 for (attr, val) in &alt.overrides {
                     println!("    {} = {}", attr, val);
                 }
