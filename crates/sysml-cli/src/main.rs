@@ -85,6 +85,8 @@ fn main() -> ExitCode {
         Command::Check { files, disable, severity, lint_only } => {
             commands::check::run(&cli, files, disable, severity, *lint_only)
         }
+        Command::Repl { files } => commands::repl::run(files),
+        Command::Doc { files, root } => commands::doc::run(&cli, files, root.as_deref()),
         Command::Find { files, pattern, kind } => {
             commands::find::run(&cli, files, pattern, kind)
         }

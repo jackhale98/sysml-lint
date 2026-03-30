@@ -136,7 +136,7 @@ fn show_raw_usage() {
         .args(["show", "--raw", &fixture("simple-vehicle.sysml"), "engine"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("engine"));
+        .stdout(predicate::str::contains("Engine"));
 }
 
 #[test]
@@ -1108,4 +1108,46 @@ fn rollup_what_if_json() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"baseline\""));
+}
+
+// ========================================================================
+// doc
+// ========================================================================
+
+#[test]
+fn doc_generates_markdown() {
+    cmd()
+        .args(["doc", &fixture("rollup-vehicle.sysml")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Model Documentation"))
+        .stdout(predicate::str::contains("Vehicle"));
+}
+
+#[test]
+fn doc_with_root() {
+    cmd()
+        .args(["doc", &fixture("rollup-vehicle.sysml"), "--root", "Vehicle"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Vehicle"));
+}
+
+#[test]
+fn doc_json() {
+    cmd()
+        .args(["-f", "json", "doc", &fixture("rollup-vehicle.sysml")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"markdown\""));
+}
+
+#[test]
+fn doc_includes_definitions() {
+    cmd()
+        .args(["doc", &fixture("rollup-vehicle.sysml")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Engine"))
+        .stdout(predicate::str::contains("Vehicle"));
 }

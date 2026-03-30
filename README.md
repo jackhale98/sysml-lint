@@ -317,6 +317,8 @@ sysml pipeline run ci
 | `init` | Initialize a `.sysml/` project | |
 | `index` | Build or rebuild project index | |
 | `pipeline` | Run named validation pipelines from config | |
+| `repl` | Interactive REPL for model exploration (list, show, find, rollup, trace) | |
+| `doc` | Generate Markdown documentation from model structure and comments | |
 | `completions` | Generate shell completion scripts | |
 | **Language Server** | | [editor setup](docs/ci-integration.md#language-server-sysml-lsp) |
 | `sysml-lsp` | LSP server with 13 capabilities: diagnostics, go-to-def, references, hover, completions, outline, workspace symbols, semantic highlighting, code actions, formatting, document highlight, folding, rename | |

@@ -592,6 +592,35 @@ pub(crate) enum Command {
         /// Topic to display (omit to list all topics).
         topic: Option<String>,
     },
+    /// Interactive REPL for exploring SysML models.
+    ///
+    /// Loads model files into memory and provides an interactive prompt
+    /// for querying, inspecting, and computing over the model.
+    ///
+    /// REPL COMMANDS: list, show, find, deps, trace, rollup, sim, help, quit
+    ///
+    /// EXAMPLES:
+    ///   sysml repl model.sysml
+    ///   sysml repl
+    Repl {
+        /// SysML v2 files to load (omit to scan project).
+        files: Vec<PathBuf>,
+    },
+    /// Generate documentation from model structure and comments.
+    ///
+    /// Produces Markdown documentation with element hierarchy,
+    /// type information, and embedded doc comments.
+    ///
+    /// EXAMPLES:
+    ///   sysml doc model.sysml
+    ///   sysml doc model.sysml --root Vehicle
+    Doc {
+        /// SysML v2 files to document (omit to scan project).
+        files: Vec<PathBuf>,
+        /// Root element to start documentation from.
+        #[arg(long)]
+        root: Option<String>,
+    },
     /// Search model elements by name pattern.
     ///
     /// Finds definitions, usages, and type references matching a
