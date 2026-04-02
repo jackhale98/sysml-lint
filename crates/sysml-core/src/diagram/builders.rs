@@ -18,7 +18,7 @@ pub fn build_bdd(model: &Model, scope: Option<&str>) -> DiagramGraph {
     let title = scope
         .map(|s| format!("bdd [{}]", s))
         .unwrap_or_else(|| format!("bdd [{}]", model.file));
-    let mut graph = DiagramGraph::new(title, DiagramKind::Bdd);
+    let mut graph = DiagramGraph::new(title, DiagramKind::GeneralView(GeneralViewFlavor::Default));
 
     let defs: Vec<&Definition> = if let Some(scope_name) = scope {
         // Show the scoped definition and its children
@@ -56,6 +56,7 @@ pub fn build_bdd(model: &Model, scope: Option<&str>) -> DiagramGraph {
             kind: NodeKind::Block,
             stereotype: Some(stereotype),
             attributes: attrs,
+            is_definition: false,
         });
     }
 
@@ -141,7 +142,7 @@ fn collect_ports_recursive(
 
 pub fn build_ibd(model: &Model, def_name: &str) -> DiagramGraph {
     let title = format!("ibd [{}]", def_name);
-    let mut graph = DiagramGraph::new(title, DiagramKind::Ibd);
+    let mut graph = DiagramGraph::new(title, DiagramKind::InterconnectionView);
 
     let usages = model.usages_in_def(def_name);
 
@@ -157,6 +158,7 @@ pub fn build_ibd(model: &Model, def_name: &str) -> DiagramGraph {
                 kind: NodeKind::Block,
                 stereotype: None,
                 attributes: child_ports,
+                is_definition: false,
             });
         } else if u.kind == "port" {
             let t = u.type_ref.as_deref().unwrap_or("?");
@@ -171,6 +173,7 @@ pub fn build_ibd(model: &Model, def_name: &str) -> DiagramGraph {
                 kind: NodeKind::Port,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
         }
     }
@@ -230,7 +233,7 @@ pub fn build_stm(model: &Model, state_def_name: Option<&str>) -> DiagramGraph {
     let title = target
         .map(|d| format!("stm [{}]", d.name))
         .unwrap_or_else(|| "stm".to_string());
-    let mut graph = DiagramGraph::new(title, DiagramKind::Stm);
+    let mut graph = DiagramGraph::new(title, DiagramKind::StateTransitionView);
 
     let Some(state_def) = target else {
         return graph;
@@ -250,6 +253,7 @@ pub fn build_stm(model: &Model, state_def_name: Option<&str>) -> DiagramGraph {
         kind: NodeKind::InitialState,
         stereotype: None,
         attributes: Vec::new(),
+                is_definition: false,
     });
 
     // Add state nodes
@@ -260,6 +264,7 @@ pub fn build_stm(model: &Model, state_def_name: Option<&str>) -> DiagramGraph {
             kind: NodeKind::State,
             stereotype: None,
             attributes: Vec::new(),
+                is_definition: false,
         });
     }
 
@@ -281,7 +286,7 @@ pub fn build_stm(model: &Model, state_def_name: Option<&str>) -> DiagramGraph {
 /// Shows: requirements, satisfy and verify relationships.
 pub fn build_req(model: &Model) -> DiagramGraph {
     let title = format!("req [{}]", model.file);
-    let mut graph = DiagramGraph::new(title, DiagramKind::Req);
+    let mut graph = DiagramGraph::new(title, DiagramKind::GridView(GridViewFlavor::Requirements));
 
     // Add requirement nodes
     for def in &model.definitions {
@@ -296,6 +301,7 @@ pub fn build_req(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Requirement,
                 stereotype: Some("<<requirement>>".to_string()),
                 attributes: attrs,
+                is_definition: false,
             });
         }
     }
@@ -341,6 +347,7 @@ pub fn build_req(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Block,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             blocks_added.insert(by_name.clone());
         }
@@ -361,6 +368,7 @@ pub fn build_req(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Block,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             blocks_added.insert(by_name.to_string());
         }
@@ -380,7 +388,7 @@ pub fn build_req(model: &Model) -> DiagramGraph {
 /// Shows: packages and their contained definitions.
 pub fn build_pkg(model: &Model) -> DiagramGraph {
     let title = format!("pkg [{}]", model.file);
-    let mut graph = DiagramGraph::new(title, DiagramKind::Pkg);
+    let mut graph = DiagramGraph::new(title, DiagramKind::BrowserView);
 
     // Packages
     let packages: Vec<&Definition> = model
@@ -396,6 +404,7 @@ pub fn build_pkg(model: &Model) -> DiagramGraph {
             kind: NodeKind::Package,
             stereotype: Some("<<package>>".to_string()),
             attributes: Vec::new(),
+                is_definition: false,
         });
 
         // Definitions contained in this package
@@ -414,6 +423,7 @@ pub fn build_pkg(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Block,
                 stereotype: Some(format!("<<{}>>", child.kind.label())),
                 attributes: Vec::new(),
+                is_definition: false,
             });
         }
 
@@ -435,6 +445,7 @@ pub fn build_pkg(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Block,
                 stereotype: Some(format!("<<{}>>", def.kind.label())),
                 attributes: Vec::new(),
+                is_definition: true,
             });
         }
     }
@@ -449,7 +460,7 @@ pub fn build_par(model: &Model, scope: Option<&str>) -> DiagramGraph {
     let title = scope
         .map(|s| format!("par [{}]", s))
         .unwrap_or_else(|| format!("par [{}]", model.file));
-    let mut graph = DiagramGraph::new(title, DiagramKind::Par);
+    let mut graph = DiagramGraph::new(title, DiagramKind::GeneralView(GeneralViewFlavor::Parametric));
 
     let constraint_defs: Vec<&Definition> = model
         .definitions
@@ -485,6 +496,7 @@ pub fn build_par(model: &Model, scope: Option<&str>) -> DiagramGraph {
             kind: NodeKind::Constraint,
             stereotype: Some("<<constraint>>".to_string()),
             attributes: attrs,
+            is_definition: false,
         });
     }
 
@@ -497,7 +509,7 @@ pub fn build_par(model: &Model, scope: Option<&str>) -> DiagramGraph {
 /// (trigger [guard] / effect), initial and final pseudo-states.
 pub fn build_stm_from_state_machine(sm: &StateMachineModel) -> DiagramGraph {
     let title = format!("stm [{}]", sm.name);
-    let mut graph = DiagramGraph::new(title, DiagramKind::Stm);
+    let mut graph = DiagramGraph::new(title, DiagramKind::StateTransitionView);
 
     // Initial pseudo-state
     graph.add_node(DiagramNode {
@@ -506,6 +518,7 @@ pub fn build_stm_from_state_machine(sm: &StateMachineModel) -> DiagramGraph {
         kind: NodeKind::InitialState,
         stereotype: None,
         attributes: Vec::new(),
+                is_definition: false,
     });
 
     // State nodes with entry/do/exit actions as attributes
@@ -526,6 +539,7 @@ pub fn build_stm_from_state_machine(sm: &StateMachineModel) -> DiagramGraph {
             kind: NodeKind::State,
             stereotype: None,
             attributes: attrs,
+            is_definition: false,
         });
     }
 
@@ -574,7 +588,7 @@ pub fn build_stm_from_state_machine(sm: &StateMachineModel) -> DiagramGraph {
 /// initial node, final node (done), and control flow edges.
 pub fn build_act_from_action_model(am: &ActionModel) -> DiagramGraph {
     let title = format!("act [{}]", am.name);
-    let mut graph = DiagramGraph::new(title, DiagramKind::Act);
+    let mut graph = DiagramGraph::new(title, DiagramKind::ActionFlowView);
 
     // Initial node
     graph.add_node(DiagramNode {
@@ -583,6 +597,7 @@ pub fn build_act_from_action_model(am: &ActionModel) -> DiagramGraph {
         kind: NodeKind::InitialState,
         stereotype: None,
         attributes: Vec::new(),
+                is_definition: false,
     });
 
     let mut counter = 0usize;
@@ -602,6 +617,7 @@ pub fn build_act_from_action_model(am: &ActionModel) -> DiagramGraph {
             kind: NodeKind::FinalState,
             stereotype: None,
             attributes: Vec::new(),
+                is_definition: false,
         });
         for id in &last_ids {
             graph.add_edge(DiagramEdge {
@@ -632,6 +648,7 @@ fn add_action_step(
                 kind: NodeKind::Action,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -659,6 +676,7 @@ fn add_action_step(
                 kind: NodeKind::Fork,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -684,6 +702,7 @@ fn add_action_step(
                 kind: NodeKind::Join,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -704,6 +723,7 @@ fn add_action_step(
                 kind: NodeKind::Decision,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -724,6 +744,7 @@ fn add_action_step(
                     kind: NodeKind::Action,
                     stereotype: None,
                     attributes: Vec::new(),
+                is_definition: false,
                 });
                 let guard_label = branch.guard.as_ref().map(|g| format!("[{}]", g));
                 graph.add_edge(DiagramEdge {
@@ -745,6 +766,7 @@ fn add_action_step(
                 kind: NodeKind::Decision, // diamonds for merge too
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -765,6 +787,7 @@ fn add_action_step(
                 kind: NodeKind::Decision,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -806,6 +829,7 @@ fn add_action_step(
                 kind: NodeKind::Action,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -830,6 +854,7 @@ fn add_action_step(
                 kind: NodeKind::Action,
                 stereotype: Some("<<send>>".to_string()),
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -850,6 +875,7 @@ fn add_action_step(
                 kind: NodeKind::Decision,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -881,6 +907,7 @@ fn add_action_step(
                 kind: NodeKind::Decision,
                 stereotype: None,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -914,6 +941,7 @@ fn add_action_step(
                 kind: NodeKind::Action,
                 stereotype: Some("accept".to_string()),
                 attributes: Vec::new(),
+                is_definition: false,
             });
             for prev in prev_ids {
                 graph.add_edge(DiagramEdge {
@@ -934,6 +962,7 @@ fn add_action_step(
                     kind: NodeKind::FinalState,
                     stereotype: None,
                     attributes: Vec::new(),
+                is_definition: false,
                 });
             }
             for prev in prev_ids {
@@ -957,7 +986,7 @@ fn add_action_step(
 /// reviews and audits.
 pub fn build_trace(model: &Model) -> DiagramGraph {
     let title = format!("trace [{}]", model.file);
-    let mut graph = DiagramGraph::new(title, DiagramKind::Trace);
+    let mut graph = DiagramGraph::new(title, DiagramKind::GridView(GridViewFlavor::Trace));
 
     // Collect requirement definitions as the central column
     for def in &model.definitions {
@@ -973,6 +1002,7 @@ pub fn build_trace(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Requirement,
                 stereotype: Some("<<requirement>>".to_string()),
                 attributes: attrs,
+                is_definition: false,
             });
         }
     }
@@ -1018,6 +1048,7 @@ pub fn build_trace(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Block,
                 stereotype,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             added_blocks.insert(by_name.clone());
         }
@@ -1043,6 +1074,7 @@ pub fn build_trace(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Block,
                 stereotype,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             added_verifiers.insert(ver_name.to_string());
         }
@@ -1090,7 +1122,7 @@ pub fn build_trace(model: &Model) -> DiagramGraph {
 /// demonstrate that all logical functions have physical homes.
 pub fn build_alloc(model: &Model) -> DiagramGraph {
     let title = format!("alloc [{}]", model.file);
-    let mut graph = DiagramGraph::new(title, DiagramKind::Alloc);
+    let mut graph = DiagramGraph::new(title, DiagramKind::GridView(GridViewFlavor::Alloc));
 
     let mut added: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -1108,6 +1140,7 @@ pub fn build_alloc(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Action,
                 stereotype: kind_label,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             added.insert(src.to_string());
         }
@@ -1122,6 +1155,7 @@ pub fn build_alloc(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Block,
                 stereotype: kind_label,
                 attributes: Vec::new(),
+                is_definition: false,
             });
             added.insert(tgt.to_string());
         }
@@ -1143,6 +1177,7 @@ pub fn build_alloc(model: &Model) -> DiagramGraph {
                 kind: NodeKind::Action,
                 stereotype: Some("<<action>> UNALLOCATED".to_string()),
                 attributes: Vec::new(),
+                is_definition: false,
             });
         }
     }
@@ -1156,7 +1191,7 @@ pub fn build_alloc(model: &Model) -> DiagramGraph {
 /// relationships between use cases.
 pub fn build_ucd(model: &Model) -> DiagramGraph {
     let title = format!("ucd [{}]", model.file);
-    let mut graph = DiagramGraph::new(title, DiagramKind::Ucd);
+    let mut graph = DiagramGraph::new(title, DiagramKind::GeneralView(GeneralViewFlavor::UseCase));
 
     let mut added_actors: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -1173,6 +1208,7 @@ pub fn build_ucd(model: &Model) -> DiagramGraph {
                 kind: NodeKind::UseCase,
                 stereotype: Some("<<use case>>".to_string()),
                 attributes: attrs,
+                is_definition: false,
             });
 
             // Find actor usages inside this use case
@@ -1186,6 +1222,7 @@ pub fn build_ucd(model: &Model) -> DiagramGraph {
                             kind: NodeKind::Actor,
                             stereotype: Some("<<actor>>".to_string()),
                             attributes: Vec::new(),
+                is_definition: false,
                         });
                         added_actors.insert(actor_name.to_string());
                     }
@@ -1210,6 +1247,81 @@ pub fn build_ucd(model: &Model) -> DiagramGraph {
                     });
                 }
             }
+        }
+    }
+
+    graph
+}
+
+/// Build a Sequence View (sv) from message flows.
+///
+/// Shows lifelines (parts) and messages between them, ordered by source position.
+pub fn build_sv(model: &Model, scope: Option<&str>) -> DiagramGraph {
+    let title = scope
+        .map(|s| format!("sv [{}]", s))
+        .unwrap_or_else(|| format!("sv [{}]", model.file));
+    let mut graph = DiagramGraph::new(title, DiagramKind::SequenceView);
+
+    // Collect lifeline participants: parts within scope (or top-level)
+    let parts: Vec<&crate::model::Usage> = if let Some(scope_name) = scope {
+        model.usages_in_def(scope_name)
+            .into_iter()
+            .filter(|u| matches!(u.kind.as_str(), "part" | "item"))
+            .collect()
+    } else {
+        model.usages.iter()
+            .filter(|u| matches!(u.kind.as_str(), "part" | "item") && u.parent_def.is_none())
+            .collect()
+    };
+
+    for part in &parts {
+        graph.add_node(DiagramNode {
+            id: part.name.clone(),
+            label: format!("{}{}", part.name,
+                part.type_ref.as_ref().map(|t| format!(" : {}", t)).unwrap_or_default()),
+            kind: NodeKind::Lifeline,
+            stereotype: None,
+            attributes: Vec::new(),
+            is_definition: false,
+        });
+    }
+
+    // Collect messages from flows
+    let lifeline_names: std::collections::HashSet<&str> =
+        parts.iter().map(|p| p.name.as_str()).collect();
+
+    for flow in &model.flows {
+        let src = simple_name(&flow.source);
+        let tgt = simple_name(&flow.target);
+        // Only include flows between known lifelines
+        if lifeline_names.contains(src) || lifeline_names.contains(tgt) {
+            // Ensure both endpoints exist as nodes
+            if !graph.has_node(src) {
+                graph.add_node(DiagramNode {
+                    id: src.to_string(),
+                    label: src.to_string(),
+                    kind: NodeKind::Lifeline,
+                    stereotype: None,
+                    attributes: Vec::new(),
+                    is_definition: false,
+                });
+            }
+            if !graph.has_node(tgt) {
+                graph.add_node(DiagramNode {
+                    id: tgt.to_string(),
+                    label: tgt.to_string(),
+                    kind: NodeKind::Lifeline,
+                    stereotype: None,
+                    attributes: Vec::new(),
+                    is_definition: false,
+                });
+            }
+            graph.add_edge(DiagramEdge {
+                source: src.to_string(),
+                target: tgt.to_string(),
+                label: flow.name.clone().or(flow.item_type.clone()),
+                kind: EdgeKind::Message,
+            });
         }
     }
 
@@ -1253,7 +1365,7 @@ mod tests {
         "#,
         );
         let graph = build_bdd(&model, None);
-        assert_eq!(graph.kind, DiagramKind::Bdd);
+        assert_eq!(graph.kind, DiagramKind::GeneralView(GeneralViewFlavor::Default));
         assert_eq!(graph.nodes.len(), 3);
         assert!(graph.has_node("Vehicle"));
         assert!(graph.has_node("Engine"));
@@ -1330,7 +1442,7 @@ mod tests {
         "#,
         );
         let graph = build_ibd(&model, "Vehicle");
-        assert_eq!(graph.kind, DiagramKind::Ibd);
+        assert_eq!(graph.kind, DiagramKind::InterconnectionView);
         assert!(graph.has_node("engine"));
         assert!(graph.has_node("transmission"));
         assert!(graph.has_node("fuelIn"));
@@ -1438,7 +1550,7 @@ mod tests {
         };
 
         let graph = build_stm_from_state_machine(&sm);
-        assert_eq!(graph.kind, DiagramKind::Stm);
+        assert_eq!(graph.kind, DiagramKind::StateTransitionView);
         assert!(graph.has_node("Red"));
         assert!(graph.has_node("Green"));
         assert!(graph.has_node("__initial__"));
@@ -1476,7 +1588,7 @@ mod tests {
         };
 
         let graph = build_act_from_action_model(&am);
-        assert_eq!(graph.kind, DiagramKind::Act);
+        assert_eq!(graph.kind, DiagramKind::ActionFlowView);
         assert!(graph.has_node("__initial__"));
         assert!(graph.has_node("__final__"));
 
@@ -1545,7 +1657,7 @@ mod tests {
         "#,
         );
         let graph = build_trace(&model);
-        assert_eq!(graph.kind, DiagramKind::Trace);
+        assert_eq!(graph.kind, DiagramKind::GridView(GridViewFlavor::Trace));
         assert!(graph.has_node("MassReq"));
         assert!(graph.has_node("SpeedReq"));
         assert!(graph.has_node("Vehicle"));
@@ -1572,7 +1684,7 @@ mod tests {
         "#,
         );
         let graph = build_alloc(&model);
-        assert_eq!(graph.kind, DiagramKind::Alloc);
+        assert_eq!(graph.kind, DiagramKind::GridView(GridViewFlavor::Alloc));
         assert!(graph.has_node("ProcessData"));
         assert!(graph.has_node("Computer"));
         assert!(graph.has_node("UnallocatedAction"), "Unallocated actions should appear");
@@ -1599,7 +1711,7 @@ mod tests {
         "#,
         );
         let graph = build_ucd(&model);
-        assert_eq!(graph.kind, DiagramKind::Ucd);
+        assert_eq!(graph.kind, DiagramKind::GeneralView(GeneralViewFlavor::UseCase));
         assert!(graph.has_node("DriveVehicle"), "Should have DriveVehicle use case");
         assert!(graph.has_node("StartEngine"), "Should have StartEngine use case");
     }

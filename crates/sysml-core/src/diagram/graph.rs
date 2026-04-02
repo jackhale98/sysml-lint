@@ -1,58 +1,108 @@
 /// Format-agnostic diagram intermediate representation.
+///
+/// Aligned with SysML v2 StandardViewDefinitions:
+/// GeneralView, InterconnectionView, ActionFlowView, StateTransitionView,
+/// SequenceView, GridView, BrowserView.
 
-/// The kind of diagram being generated.
+/// The kind of diagram, aligned with SysML v2 StandardViewDefinitions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagramKind {
-    /// Block Definition Diagram — definitions and their relationships.
-    Bdd,
-    /// Internal Block Diagram — internal structure of a single definition.
-    Ibd,
-    /// State Machine Diagram — states and transitions.
-    Stm,
-    /// Activity Diagram — action flow.
-    Act,
-    /// Requirements Diagram — requirements and trace relationships.
-    Req,
-    /// Package Diagram — packages and containment.
-    Pkg,
-    /// Parametric Diagram — constraints and parameters.
-    Par,
-    /// Traceability Diagram — V-model: requirements → design → verification.
+    /// GeneralView (gv) — general graph of definitions and relationships.
+    GeneralView(GeneralViewFlavor),
+    /// InterconnectionView (iv) — internal structure with ports and connections.
+    InterconnectionView,
+    /// ActionFlowView (afv) — action flows with control nodes.
+    ActionFlowView,
+    /// StateTransitionView (stv) — states and transitions.
+    StateTransitionView,
+    /// SequenceView (sv) — lifelines and messages.
+    SequenceView,
+    /// GridView (grv) — tabular/matrix presentations.
+    GridView(GridViewFlavor),
+    /// BrowserView (bv) — hierarchical tree/outline.
+    BrowserView,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneralViewFlavor {
+    Default,
+    Parametric,
+    UseCase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridViewFlavor {
+    Default,
+    Requirements,
     Trace,
-    /// Allocation Diagram — logical-to-physical mapping (actions/use-cases → parts).
     Alloc,
-    /// Use Case Diagram — use case definitions and actors.
-    Ucd,
 }
 
 impl DiagramKind {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Bdd => "Block Definition Diagram",
-            Self::Ibd => "Internal Block Diagram",
-            Self::Stm => "State Machine Diagram",
-            Self::Act => "Activity Diagram",
-            Self::Req => "Requirements Diagram",
-            Self::Pkg => "Package Diagram",
-            Self::Par => "Parametric Diagram",
-            Self::Trace => "Traceability Diagram",
-            Self::Alloc => "Allocation Diagram",
-            Self::Ucd => "Use Case Diagram",
+            Self::GeneralView(GeneralViewFlavor::Default) => "General View",
+            Self::GeneralView(GeneralViewFlavor::Parametric) => "Parametric View",
+            Self::GeneralView(GeneralViewFlavor::UseCase) => "Use Case View",
+            Self::InterconnectionView => "Interconnection View",
+            Self::ActionFlowView => "Action Flow View",
+            Self::StateTransitionView => "State Transition View",
+            Self::SequenceView => "Sequence View",
+            Self::GridView(GridViewFlavor::Default) => "Grid View",
+            Self::GridView(GridViewFlavor::Requirements) => "Requirements View",
+            Self::GridView(GridViewFlavor::Trace) => "Traceability View",
+            Self::GridView(GridViewFlavor::Alloc) => "Allocation View",
+            Self::BrowserView => "Browser View",
+        }
+    }
+
+    pub fn abbreviation(&self) -> &'static str {
+        match self {
+            Self::GeneralView(_) => "gv",
+            Self::InterconnectionView => "iv",
+            Self::ActionFlowView => "afv",
+            Self::StateTransitionView => "stv",
+            Self::SequenceView => "sv",
+            Self::GridView(_) => "grv",
+            Self::BrowserView => "bv",
         }
     }
 
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "bdd" => Some(Self::Bdd),
-            "ibd" => Some(Self::Ibd),
-            "stm" | "state" => Some(Self::Stm),
-            "act" | "activity" => Some(Self::Act),
-            "req" | "requirements" => Some(Self::Req),
-            "pkg" | "package" => Some(Self::Pkg),
-            "par" | "parametric" => Some(Self::Par),
-            "trace" | "traceability" => Some(Self::Trace),
-            "alloc" | "allocation" => Some(Self::Alloc),
-            "ucd" | "usecase" | "use-case" => Some(Self::Ucd),
+            // Canonical SysML v2 standard names
+            "gv" | "generalview" => Some(Self::GeneralView(GeneralViewFlavor::Default)),
+            "iv" | "interconnectionview" => Some(Self::InterconnectionView),
+            "afv" | "actionflowview" => Some(Self::ActionFlowView),
+            "stv" | "statetransitionview" => Some(Self::StateTransitionView),
+            "sv" | "sequenceview" | "sequence" => Some(Self::SequenceView),
+            "grv" | "gridview" => Some(Self::GridView(GridViewFlavor::Default)),
+            "bv" | "browserview" => Some(Self::BrowserView),
+            // Legacy aliases (backward compatibility)
+            "bdd" => Some(Self::GeneralView(GeneralViewFlavor::Default)),
+            "ibd" => Some(Self::InterconnectionView),
+            "stm" | "state" => Some(Self::StateTransitionView),
+            "act" | "activity" => Some(Self::ActionFlowView),
+            "req" | "requirements" => Some(Self::GridView(GridViewFlavor::Requirements)),
+            "pkg" | "package" => Some(Self::BrowserView),
+            "par" | "parametric" => Some(Self::GeneralView(GeneralViewFlavor::Parametric)),
+            "trace" | "traceability" => Some(Self::GridView(GridViewFlavor::Trace)),
+            "alloc" | "allocation" => Some(Self::GridView(GridViewFlavor::Alloc)),
+            "ucd" | "usecase" | "use-case" => Some(Self::GeneralView(GeneralViewFlavor::UseCase)),
+            _ => None,
+        }
+    }
+
+    /// Parse a SysML v2 render clause (e.g., "asInterconnectionDiagram").
+    pub fn from_render_clause(s: &str) -> Option<Self> {
+        match s {
+            "asGeneralDiagram" => Some(Self::GeneralView(GeneralViewFlavor::Default)),
+            "asInterconnectionDiagram" => Some(Self::InterconnectionView),
+            "asActionFlowDiagram" => Some(Self::ActionFlowView),
+            "asStateTransitionDiagram" => Some(Self::StateTransitionView),
+            "asSequenceDiagram" => Some(Self::SequenceView),
+            "asTableDiagram" | "asGridDiagram" => Some(Self::GridView(GridViewFlavor::Default)),
+            "asBrowserDiagram" | "asTreeDiagram" => Some(Self::BrowserView),
             _ => None,
         }
     }
@@ -120,6 +170,34 @@ pub struct DiagramNode {
     pub kind: NodeKind,
     pub stereotype: Option<String>,
     pub attributes: Vec<(String, String)>,
+    /// SysML v2 convention: definitions have square corners, usages have rounded.
+    pub is_definition: bool,
+}
+
+impl DiagramNode {
+    /// Create a node for a definition (square corners).
+    pub fn definition(id: String, label: String, kind: NodeKind) -> Self {
+        Self {
+            id,
+            label,
+            kind,
+            stereotype: None,
+            attributes: Vec::new(),
+            is_definition: true,
+        }
+    }
+
+    /// Create a node for a usage (rounded corners).
+    pub fn usage(id: String, label: String, kind: NodeKind) -> Self {
+        Self {
+            id,
+            label,
+            kind,
+            stereotype: None,
+            attributes: Vec::new(),
+            is_definition: false,
+        }
+    }
 }
 
 /// Classification of diagram nodes.
@@ -140,6 +218,7 @@ pub enum NodeKind {
     Note,
     UseCase,
     Actor,
+    Lifeline,
 }
 
 /// An edge in the diagram graph.
@@ -165,6 +244,7 @@ pub enum EdgeKind {
     Dependency,
     Containment,
     ConstraintBinding,
+    Message,
 }
 
 /// A subgraph (containment group).
@@ -217,8 +297,6 @@ impl DiagramGraph {
     }
 
     /// Remove nodes and edges that don't match the allowed set of names.
-    /// Pseudo-nodes (initial/final states) and structural nodes (forks/joins/decisions)
-    /// are always kept. Edges are kept only if both endpoints remain.
     pub fn filter_by_names(&mut self, allowed: &std::collections::HashSet<&str>) {
         self.nodes.retain(|n| {
             matches!(
@@ -238,5 +316,55 @@ impl DiagramGraph {
             sg.node_ids.retain(|id| remaining.contains(id.as_str()));
         });
         self.subgraphs.retain(|sg| !sg.node_ids.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_names_parse() {
+        assert_eq!(DiagramKind::from_str("gv"), Some(DiagramKind::GeneralView(GeneralViewFlavor::Default)));
+        assert_eq!(DiagramKind::from_str("iv"), Some(DiagramKind::InterconnectionView));
+        assert_eq!(DiagramKind::from_str("afv"), Some(DiagramKind::ActionFlowView));
+        assert_eq!(DiagramKind::from_str("stv"), Some(DiagramKind::StateTransitionView));
+        assert_eq!(DiagramKind::from_str("sv"), Some(DiagramKind::SequenceView));
+        assert_eq!(DiagramKind::from_str("grv"), Some(DiagramKind::GridView(GridViewFlavor::Default)));
+        assert_eq!(DiagramKind::from_str("bv"), Some(DiagramKind::BrowserView));
+    }
+
+    #[test]
+    fn legacy_aliases_parse() {
+        assert_eq!(DiagramKind::from_str("bdd"), Some(DiagramKind::GeneralView(GeneralViewFlavor::Default)));
+        assert_eq!(DiagramKind::from_str("ibd"), Some(DiagramKind::InterconnectionView));
+        assert_eq!(DiagramKind::from_str("stm"), Some(DiagramKind::StateTransitionView));
+        assert_eq!(DiagramKind::from_str("act"), Some(DiagramKind::ActionFlowView));
+        assert_eq!(DiagramKind::from_str("req"), Some(DiagramKind::GridView(GridViewFlavor::Requirements)));
+        assert_eq!(DiagramKind::from_str("pkg"), Some(DiagramKind::BrowserView));
+        assert_eq!(DiagramKind::from_str("par"), Some(DiagramKind::GeneralView(GeneralViewFlavor::Parametric)));
+        assert_eq!(DiagramKind::from_str("trace"), Some(DiagramKind::GridView(GridViewFlavor::Trace)));
+        assert_eq!(DiagramKind::from_str("alloc"), Some(DiagramKind::GridView(GridViewFlavor::Alloc)));
+        assert_eq!(DiagramKind::from_str("ucd"), Some(DiagramKind::GeneralView(GeneralViewFlavor::UseCase)));
+    }
+
+    #[test]
+    fn render_clause_parsing() {
+        assert_eq!(
+            DiagramKind::from_render_clause("asInterconnectionDiagram"),
+            Some(DiagramKind::InterconnectionView)
+        );
+        assert_eq!(
+            DiagramKind::from_render_clause("asSequenceDiagram"),
+            Some(DiagramKind::SequenceView)
+        );
+        assert_eq!(DiagramKind::from_render_clause("unknown"), None);
+    }
+
+    #[test]
+    fn abbreviations() {
+        assert_eq!(DiagramKind::GeneralView(GeneralViewFlavor::Default).abbreviation(), "gv");
+        assert_eq!(DiagramKind::InterconnectionView.abbreviation(), "iv");
+        assert_eq!(DiagramKind::SequenceView.abbreviation(), "sv");
     }
 }

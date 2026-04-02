@@ -44,9 +44,10 @@ fn render_mermaid(graph: &DiagramGraph) -> String {
     out.push_str("---\n");
 
     match graph.kind {
-        DiagramKind::Stm => render_mermaid_stm(&mut out, graph),
-        DiagramKind::Act => render_mermaid_activity(&mut out, graph),
-        DiagramKind::Req | DiagramKind::Trace | DiagramKind::Alloc | DiagramKind::Ucd => {
+        DiagramKind::StateTransitionView => render_mermaid_stm(&mut out, graph),
+        DiagramKind::ActionFlowView => render_mermaid_activity(&mut out, graph),
+        DiagramKind::SequenceView => render_mermaid_sequence(&mut out, graph),
+        DiagramKind::GridView(_) | DiagramKind::GeneralView(GeneralViewFlavor::UseCase) => {
             render_mermaid_flowchart(&mut out, graph)
         }
         _ => render_mermaid_class_diagram(&mut out, graph),
@@ -197,6 +198,26 @@ fn render_mermaid_activity(out: &mut String, graph: &DiagramGraph) {
     }
 }
 
+fn render_mermaid_sequence(out: &mut String, graph: &DiagramGraph) {
+    out.push_str("sequenceDiagram\n");
+    // Declare participants in order
+    for node in &graph.nodes {
+        if node.kind == NodeKind::Lifeline {
+            out.push_str(&format!("    participant {} as {}\n", mermaid_id(&node.id), node.label));
+        }
+    }
+    // Messages in order
+    for edge in &graph.edges {
+        if edge.kind == EdgeKind::Message {
+            let label = edge.label.as_deref().unwrap_or("");
+            out.push_str(&format!(
+                "    {}->>{}:{}\n",
+                mermaid_id(&edge.source), mermaid_id(&edge.target), label
+            ));
+        }
+    }
+}
+
 fn render_mermaid_flowchart(out: &mut String, graph: &DiagramGraph) {
     out.push_str(&format!("flowchart {}\n", graph.direction.mermaid_code()));
     for node in &graph.nodes {
@@ -213,11 +234,16 @@ fn render_mermaid_flowchart(out: &mut String, graph: &DiagramGraph) {
             .collect::<String>();
         let full_label = format!("{}{}{}", node.label, stereo, attrs_str);
         let shape = match node.kind {
-            NodeKind::Requirement => format!("{}[\"{}\"]\n", id, full_label),
-            NodeKind::Block => format!("{}([\"{}\"])\n", id, full_label),
-            NodeKind::UseCase => format!("{}([\"{}\"]) \n", id, full_label),
             NodeKind::Actor => format!("{}@{{ shape: person, label: \"{}\" }}@\n", id, node.label),
-            _ => format!("{}[\"{}\"]\n", id, full_label),
+            NodeKind::UseCase => format!("{}([\"{}\"]) \n", id, full_label),
+            _ => {
+                // SysML v2 convention: definitions = square corners, usages = rounded
+                if node.is_definition {
+                    format!("{}[\"{}\"]\n", id, full_label)
+                } else {
+                    format!("{}([\"{}\"])\n", id, full_label)
+                }
+            }
         };
         out.push_str(&format!("    {}", shape));
     }
@@ -248,10 +274,26 @@ fn render_plantuml(graph: &DiagramGraph) -> String {
     out.push_str(&format!("title {}\n\n", graph.title));
 
     match graph.kind {
-        DiagramKind::Stm => render_plantuml_stm(&mut out, graph),
-        DiagramKind::Act => render_plantuml_activity(&mut out, graph),
-        DiagramKind::Req | DiagramKind::Trace => render_plantuml_req(&mut out, graph),
-        DiagramKind::Ucd => render_plantuml_ucd(&mut out, graph),
+        DiagramKind::StateTransitionView => render_plantuml_stm(&mut out, graph),
+        DiagramKind::ActionFlowView => render_plantuml_activity(&mut out, graph),
+        DiagramKind::SequenceView => {
+            // PlantUML sequence diagram
+            for node in &graph.nodes {
+                if node.kind == NodeKind::Lifeline {
+                    out.push_str(&format!("participant \"{}\" as {}\n", node.label, node.id.replace(' ', "_")));
+                }
+            }
+            out.push('\n');
+            for edge in &graph.edges {
+                if edge.kind == EdgeKind::Message {
+                    let label = edge.label.as_deref().unwrap_or("");
+                    out.push_str(&format!("{} -> {} : {}\n",
+                        edge.source.replace(' ', "_"), edge.target.replace(' ', "_"), label));
+                }
+            }
+        }
+        DiagramKind::GridView(_) => render_plantuml_req(&mut out, graph),
+        DiagramKind::GeneralView(GeneralViewFlavor::UseCase) => render_plantuml_ucd(&mut out, graph),
         _ => render_plantuml_class(&mut out, graph),
     }
 
@@ -509,7 +551,7 @@ fn render_dot(graph: &DiagramGraph) -> String {
     out.push_str("    fontsize=14;\n\n");
 
     // Activity diagrams get special styling
-    if graph.kind == DiagramKind::Act {
+    if graph.kind == DiagramKind::ActionFlowView {
         out.push_str("    node [fontname=\"Helvetica\"];\n");
         out.push_str("    edge [fontname=\"Helvetica\"];\n\n");
     }
@@ -557,6 +599,7 @@ fn render_dot(graph: &DiagramGraph) -> String {
             NodeKind::Note => ("note", ""),
             NodeKind::UseCase => ("ellipse", ""),
             NodeKind::Actor => ("box", ", style=\"rounded\""),
+            NodeKind::Lifeline => ("box", ", style=\"rounded\""),
         };
 
         let label = if extra.contains("label=\"\"") {
@@ -693,6 +736,7 @@ fn render_d2_node(out: &mut String, node: &DiagramNode, indent: &str) {
         NodeKind::Fork | NodeKind::Join => "rectangle",
         NodeKind::UseCase => "oval",
         NodeKind::Actor => "person",
+        NodeKind::Lifeline => "rectangle",
     };
 
     if node.attributes.is_empty() && node.stereotype.is_none() {
@@ -908,7 +952,7 @@ mod tests {
         // Fixed to: "id([\"label\"])\n"
         let graph = DiagramGraph {
             title: "Test".to_string(),
-            kind: DiagramKind::Req,
+            kind: DiagramKind::GridView(GridViewFlavor::Requirements),
             nodes: vec![
                 DiagramNode {
                     id: "block1".to_string(),
@@ -916,6 +960,7 @@ mod tests {
                     kind: NodeKind::Block,
                     stereotype: None,
                     attributes: vec![],
+                    is_definition: false,
                 },
             ],
             edges: vec![],
@@ -936,7 +981,7 @@ mod tests {
         // Fixed to (( ● )) using unicode BLACK CIRCLE
         let graph = DiagramGraph {
             title: "Test".to_string(),
-            kind: DiagramKind::Act,
+            kind: DiagramKind::ActionFlowView,
             nodes: vec![
                 DiagramNode {
                     id: "end1".to_string(),
@@ -944,6 +989,7 @@ mod tests {
                     kind: NodeKind::FinalState,
                     stereotype: None,
                     attributes: vec![],
+                    is_definition: false,
                 },
             ],
             edges: vec![],
@@ -963,7 +1009,7 @@ mod tests {
         // Verify that IDs with colons get sanitized in mermaid output
         let graph = DiagramGraph {
             title: "Test".to_string(),
-            kind: DiagramKind::Req,
+            kind: DiagramKind::GridView(GridViewFlavor::Requirements),
             nodes: vec![
                 DiagramNode {
                     id: "Pkg::Req1".to_string(),
@@ -971,6 +1017,7 @@ mod tests {
                     kind: NodeKind::Requirement,
                     stereotype: None,
                     attributes: vec![],
+                    is_definition: false,
                 },
             ],
             edges: vec![],

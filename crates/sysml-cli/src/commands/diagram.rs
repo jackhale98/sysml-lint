@@ -62,8 +62,8 @@ pub(crate) fn run(
     let model = sysml_parser::parse_file(&path_str, &source);
 
     let mut graph = match kind {
-        DiagramKind::Bdd => build_bdd(&model, scope),
-        DiagramKind::Ibd => {
+        DiagramKind::GeneralView(GeneralViewFlavor::Default) => build_bdd(&model, scope),
+        DiagramKind::InterconnectionView => {
             let def_name = match scope {
                 Some(s) => s,
                 None => {
@@ -73,7 +73,7 @@ pub(crate) fn run(
             };
             build_ibd(&model, def_name)
         }
-        DiagramKind::Stm => {
+        DiagramKind::StateTransitionView => {
             // Try rich STM from state_parser first
             use sysml_core::sim::state_parser::extract_state_machines;
             let machines = extract_state_machines(&path_str, &source);
@@ -88,7 +88,7 @@ pub(crate) fn run(
                 build_stm(&model, scope)
             }
         }
-        DiagramKind::Act => {
+        DiagramKind::ActionFlowView => {
             use sysml_core::sim::action_parser::extract_actions;
             let actions = extract_actions(&path_str, &source);
             let action = if let Some(s) = scope {
@@ -104,12 +104,17 @@ pub(crate) fn run(
                 }
             }
         }
-        DiagramKind::Req => build_req(&model),
-        DiagramKind::Pkg => build_pkg(&model),
-        DiagramKind::Par => build_par(&model, scope),
-        DiagramKind::Trace => build_trace(&model),
-        DiagramKind::Alloc => build_alloc(&model),
-        DiagramKind::Ucd => build_ucd(&model),
+        DiagramKind::GridView(GridViewFlavor::Requirements) => build_req(&model),
+        DiagramKind::BrowserView => build_pkg(&model),
+        DiagramKind::GeneralView(GeneralViewFlavor::Parametric) => build_par(&model, scope),
+        DiagramKind::GridView(GridViewFlavor::Trace) => build_trace(&model),
+        DiagramKind::GridView(GridViewFlavor::Alloc) => build_alloc(&model),
+        DiagramKind::GeneralView(GeneralViewFlavor::UseCase) => build_ucd(&model),
+        DiagramKind::SequenceView => {
+            // Sequence view: build from flows/messages
+            build_sv(&model, scope)
+        }
+        DiagramKind::GridView(GridViewFlavor::Default) => build_trace(&model),
     };
 
     graph.direction = layout_dir;

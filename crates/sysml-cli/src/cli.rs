@@ -170,19 +170,24 @@ pub(crate) enum Command {
     ///
     /// Produces diagrams in Mermaid, PlantUML, DOT, or D2 format.
     ///
-    /// DIAGRAM TYPES (standard SysML v2):
-    ///   bdd    — Block Definition Diagram (definitions and relationships)
-    ///   ibd    — Internal Block Diagram (internal structure of a part)
-    ///   stm    — State Machine Diagram (states and transitions)
-    ///   act    — Activity Diagram (action flow with decisions/forks)
-    ///   req    — Requirements Diagram (requirements and trace status)
-    ///   pkg    — Package Diagram (packages and containment hierarchy)
-    ///   par    — Parametric Diagram (constraints and parameters)
+    /// DIAGRAM TYPES (SysML v2 StandardViewDefinitions):
+    ///   gv     — General View (definitions and relationships)
+    ///   iv     — Interconnection View (internal structure with ports)
+    ///   afv    — Action Flow View (actions with control nodes)
+    ///   stv    — State Transition View (states and transitions)
+    ///   sv     — Sequence View (lifelines and messages)
+    ///   grv    — Grid View (tabular/matrix)
+    ///   bv     — Browser View (package hierarchy)
     ///
-    /// DIAGRAM TYPES (MBSE analysis):
-    ///   trace  — Traceability Diagram (V-model: requirements → satisfy → verify)
-    ///   alloc  — Allocation Diagram (logical functions → physical parts)
-    ///   ucd    — Use Case Diagram (actors and use cases)
+    /// SPECIALIZATIONS:
+    ///   par    — Parametric (constraint parameters)
+    ///   req    — Requirements grid
+    ///   trace  — Traceability matrix
+    ///   alloc  — Allocation matrix
+    ///   ucd    — Use Case view
+    ///
+    /// LEGACY ALIASES (still supported):
+    ///   bdd=gv  ibd=iv  stm=stv  act=afv  pkg=bv
     ///
     /// OUTPUT FORMATS:
     ///   mermaid  — Mermaid.js (render in GitHub, Obsidian, etc.)
@@ -203,7 +208,12 @@ pub(crate) enum Command {
 
         /// Diagram type.
         #[arg(short = 't', long = "type", required = true,
-              value_parser = ["bdd", "ibd", "stm", "act", "req", "pkg", "par", "trace", "alloc", "ucd"],
+              value_parser = ["gv", "iv", "afv", "stv", "sv", "grv", "bv",
+                              "bdd", "ibd", "stm", "act", "req", "pkg", "par",
+                              "trace", "alloc", "ucd",
+                              "state", "activity", "requirements", "package",
+                              "parametric", "traceability", "allocation",
+                              "usecase", "use-case", "sequence"],
               help_heading = "Diagram")]
         diagram_type: String,
 

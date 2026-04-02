@@ -133,16 +133,23 @@ sysml add model.sysml verification-def TestTempAccuracy \
     -m "requirement tempReq:TemperatureAccuracy"
 ```
 
-### 10 diagram types, 4 output formats
+### SysML v2 standard views, 4 output formats
 
-Generate BDD, IBD, state machine, activity, requirements, package, parametric, traceability, allocation, and use case diagrams — output as Mermaid, PlantUML, Graphviz DOT, or D2:
+Generate all 7 standard SysML v2 views (General, Interconnection, Action Flow, State Transition, Sequence, Grid, Browser) plus parametric, traceability, allocation, and use case — in Mermaid, PlantUML, DOT, or D2:
 
 ```sh
-sysml diagram -t bdd model.sysml
-sysml diagram -t ibd --scope Vehicle model.sysml
-sysml diagram -t stm --scope EngineStates model.sysml
-sysml diagram -t trace -o plantuml requirements.sysml
+sysml diagram -t gv model.sysml                        # General View (definitions)
+sysml diagram -t iv --scope Vehicle model.sysml         # Interconnection View (ports + connections)
+sysml diagram -t stv --scope EngineStates model.sysml   # State Transition View
+sysml diagram -t afv --scope ProvidePower model.sysml   # Action Flow View
+sysml diagram -t sv --scope Interactions model.sysml    # Sequence View (lifelines + messages)
+sysml diagram -t bv model.sysml                         # Browser View (package hierarchy)
+sysml diagram -t grv model.sysml                        # Grid View (requirements matrix)
 ```
+
+Legacy names still work: `bdd`=`gv`, `ibd`=`iv`, `stm`=`stv`, `act`=`afv`, `pkg`=`bv`, `req`=`grv`.
+
+Definitions render with **square corners**, usages with **rounded corners** (SysML v2 graphical convention).
 
 **Block Definition Diagram (BDD):**
 
@@ -341,7 +348,7 @@ sysml pipeline run ci
 | `analyze run` | Execute an analysis case with subject binding | |
 | `analyze trade` | Compare alternatives in a trade study | |
 | **Diagrams** | | [diagrams](docs/commands/diagrams.md) |
-| `diagram` | Generate diagrams (bdd, ibd, stm, act, req, pkg, par, trace, alloc, ucd) | |
+| `diagram` | Generate SysML v2 standard views: gv, iv, afv, stv, sv, grv, bv (+ par, trace, alloc, ucd) | |
 | **Simulation & Export** | | [simulation](docs/commands/simulation.md) |
 | `simulate` (`sim`) | Evaluate constraints, state machines, action flows | |
 | `export` | Export FMI 3.0, Modelica, SSP artifacts | |
